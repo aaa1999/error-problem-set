@@ -3,6 +3,11 @@ import { join } from "@tauri-apps/api/path";
 import { exists, readFile, writeFile } from "@tauri-apps/plugin-fs";
 import type { ImageBlock } from "../types";
 
+/** 本地路径 → webview 可显示的 URL；统一成正斜杠，避免 Windows 下混用分隔符 */
+export function fileSrc(path: string): string {
+  return convertFileSrc(path.replace(/\\/g, "/"));
+}
+
 export const IMAGE_EXTS = ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"];
 
 /** 取扩展名（小写，不带点） */
@@ -39,7 +44,7 @@ export async function saveImage(dataDir: string, bytes: Uint8Array, ext: string)
 }
 
 export function assetUrlFor(assetsDir: string, b: ImageBlock): string {
-  return convertFileSrc(`${assetsDir}/${b.hash}.${b.ext}`);
+  return fileSrc(`${assetsDir}/${b.hash}.${b.ext}`);
 }
 
 /** 从本地文件路径导入图片，非图片返回 null */

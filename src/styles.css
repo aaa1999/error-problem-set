@@ -776,6 +776,11 @@ kbd {
   line-height: 1.7;
 }
 
+.welcome-card .install-note {
+  margin: 4px 0 8px;
+  line-height: 1.6;
+}
+
 /* ---------- 灯箱 ---------- */
 .lightbox {
   position: fixed;

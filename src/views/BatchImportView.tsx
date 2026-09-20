@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { basename, join } from "@tauri-apps/api/path";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { readDir } from "@tauri-apps/plugin-fs";
 import type { Mistake } from "../types";
-import { IMAGE_EXTS, extOf, importImageFile } from "../lib/images";
+import { IMAGE_EXTS, extOf, fileSrc, importImageFile } from "../lib/images";
 import { folderPathName } from "../lib/folders";
 import { naturalCompare, uuid } from "../lib/utils";
 import { useBook } from "../store";
@@ -272,7 +271,7 @@ export function BatchImportView({
                 </div>
                 {g.list.map(({ row, idx }) => (
                   <div className="batch-row" key={row.path}>
-                    <img className="batch-thumb" src={convertFileSrc(row.path)} alt="" loading="lazy" />
+                    <img className="batch-thumb" src={fileSrc(row.path)} alt="" loading="lazy" />
                     <div className="batch-name" title={row.path}>
                       {idx + 1}. {row.name}
                     </div>
