@@ -18,6 +18,8 @@ export interface Book {
   assetSrc: (b: ImageBlock) => string;
   chooseDataDir: (dir: string) => Promise<void>;
   addMistake: (m: Mistake) => Promise<void>;
+  /** 批量追加错题（数据目录合并用），跳过已存在的 id，返回实际新增数 */
+  addMistakes: (ms: Mistake[]) => Promise<number>;
   updateMistake: (m: Mistake) => Promise<void>;
   deleteMistake: (id: string) => Promise<void>;
   /** 读取最新数据里的指定错题（批量导入循环里用，避免闭包旧值） */
@@ -85,6 +87,17 @@ export function BookProvider({ children }: { children: ReactNode }) {
     async (m: Mistake) => {
       const cur = dbRef.current;
       await persist({ ...cur, mistakes: [...cur.mistakes, m] });
+    },
+    [persist],
+  );
+
+  const addMistakes = useCallback(
+    async (ms: Mistake[]) => {
+      const cur = dbRef.current;
+      const ids = new Set(cur.mistakes.map(m => m.id));
+      const add = ms.filter(m => !ids.has(m.id));
+      if (add.length > 0) await persist({ ...cur, mistakes: [...cur.mistakes, ...add] });
+      return add.length;
     },
     [persist],
   );
@@ -180,6 +193,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       assetSrc: (b: ImageBlock) => assetUrlFor(assetsDir, b),
       chooseDataDir,
       addMistake,
+      addMistakes,
       updateMistake,
       deleteMistake,
       getMistake,
@@ -198,6 +212,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       tagCounts,
       chooseDataDir,
       addMistake,
+      addMistakes,
       updateMistake,
       deleteMistake,
       getMistake,

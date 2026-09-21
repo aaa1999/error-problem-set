@@ -9,6 +9,7 @@ import { naturalCompare, uuid } from "../lib/utils";
 import { useBook } from "../store";
 import { TagInput } from "../components/TagInput";
 import { FolderSelect } from "../components/FolderSelect";
+import { MergeImport } from "../components/MergeImport";
 
 type RowMode = "q" | "a" | "skip";
 
@@ -334,6 +335,8 @@ export function BatchImportView({
           )}
         </div>
       )}
+
+      <MergeImport />
     </div>
   );
 }
