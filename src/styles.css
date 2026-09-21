@@ -438,6 +438,34 @@ kbd {
   font-size: 14px;
 }
 
+/* ---------- 笔记（占位） ---------- */
+.notes-ideas {
+  max-width: 560px;
+  margin: 10px auto 0;
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 24px;
+  line-height: 1.8;
+  font-size: 14px;
+}
+
+.notes-ideas-title {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.notes-ideas ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.notes-ideas li {
+  margin: 4px 0;
+}
+
 .browse-foot {
   display: flex;
   align-items: center;

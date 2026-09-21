@@ -6,8 +6,9 @@ import { BrowseView } from "./views/BrowseView";
 import { EntryView } from "./views/EntryView";
 import { BatchImportView } from "./views/BatchImportView";
 import { WelcomeView } from "./views/WelcomeView";
+import { NotesView } from "./views/NotesView";
 
-type View = { name: "browse" } | { name: "entry"; editId?: string } | { name: "batch" };
+type View = { name: "browse" } | { name: "entry"; editId?: string } | { name: "batch" } | { name: "notes" };
 
 export default function App() {
   const { status, dataDir, db, chooseDataDir } = useBook();
@@ -49,6 +50,9 @@ export default function App() {
           <button className={`tab ${view.name === "batch" ? "active" : ""}`} onClick={() => setView({ name: "batch" })}>
             批量导入
           </button>
+          <button className={`tab ${view.name === "notes" ? "active" : ""}`} onClick={() => setView({ name: "notes" })}>
+            笔记
+          </button>
         </nav>
         <div className="topbar-right">
           <span className="muted" title={dataDir}>
@@ -79,6 +83,7 @@ export default function App() {
           />
         )}
         {view.name === "batch" && <BatchImportView onDone={() => setView({ name: "browse" })} defaultFolderId={defaultFolderId} />}
+        {view.name === "notes" && <NotesView />}
       </main>
     </div>
   );
