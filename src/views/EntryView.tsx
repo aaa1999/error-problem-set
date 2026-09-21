@@ -17,7 +17,7 @@ export function EntryView({
   onGoBatch: () => void;
   defaultFolderId?: string | null;
 }) {
-  const { db, allTags, addMistake, updateMistake } = useBook();
+  const { db, allTags, addMistake, updateMistake, getMistake } = useBook();
   const editing = editId ? db.mistakes.find(m => m.id === editId) : undefined;
   // 用 ref 取最新的编辑目标，避免自动保存更新 db 后触发重复保存
   const editingRef = useRef(editing);
@@ -28,6 +28,30 @@ export function EntryView({
   const [tags, setTags] = useState<string[]>(() => (editing ? [...editing.tags] : []));
   const [folderId, setFolderId] = useState<string | null>(() => (editing ? editing.folderId ?? null : defaultFolderId));
   const [flash, setFlash] = useState("");
+
+  // 表单最新值镜像：卸载时兜底保存用
+  const formRef = useRef({ qBlocks, aBlocks, tags, folderId, editId });
+  formRef.current = { qBlocks, aBlocks, tags, folderId, editId };
+
+  // 切走页面（含切到笔记 tab）时，自动保存的 900ms 间隙里没落盘的内容补一次
+  useEffect(() => {
+    return () => {
+      const f = formRef.current;
+      if (!f.editId) return; // 新题只认显式保存
+      const target = getMistake(f.editId);
+      if (target && !isBlocksEmpty(f.qBlocks)) {
+        void updateMistake({
+          ...target,
+          question: f.qBlocks,
+          analysis: f.aBlocks,
+          tags: f.tags,
+          folderId: f.folderId,
+          updatedAt: Date.now(),
+        });
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const valid = !isBlocksEmpty(qBlocks);
 

@@ -58,31 +58,52 @@ body {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 20px;
-  height: 54px;
+  gap: 16px;
+  height: 56px;
   padding: 0 20px;
   background: var(--card);
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
 
-.brand {
-  font-weight: 700;
-  font-size: 17px;
-  letter-spacing: 0.5px;
+.tabs-main {
+  display: flex;
+  gap: 6px;
+}
+
+.tab-main {
+  border: none;
+  background: transparent;
+  padding: 8px 18px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.tab-main:hover {
+  background: #f1efe9;
+}
+
+.tab-main.active {
+  background: var(--ink);
+  color: #fff;
 }
 
 .tabs {
   display: flex;
   gap: 4px;
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
 }
 
 .tab {
   border: none;
   background: transparent;
-  padding: 7px 16px;
+  padding: 6px 14px;
   border-radius: 999px;
-  font-size: 14px;
+  font-size: 13.5px;
   color: var(--ink);
   cursor: pointer;
 }
