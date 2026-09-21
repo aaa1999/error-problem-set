@@ -1,10 +1,41 @@
 import { useState } from "react";
 import { join } from "@tauri-apps/api/path";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { copyFile, exists } from "@tauri-apps/plugin-fs";
+import { copyFile, exists, readDir } from "@tauri-apps/plugin-fs";
 import type { Database, Folder, Mistake } from "../types";
 import { loadDb } from "../lib/db";
 import { useBook } from "../store";
+
+/**
+ * 定位数据目录：所选文件夹本身含 data.json 直接用；
+ * 否则往下找两层（比如整台机器的「错题本」文件夹、或含 data/ 子目录的安装目录整包拷贝）。
+ * 找到多个时报错让用户选具体那个。
+ */
+async function findDataDir(root: string): Promise<string> {
+  if (await exists(await join(root, "data.json"))) return root;
+  const candidates: string[] = [];
+  const scan = async (dir: string, depth: number) => {
+    if (depth > 2 || candidates.length > 1) return;
+    let entries;
+    try {
+      entries = await readDir(dir);
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory || e.name.startsWith(".")) continue;
+      const child = await join(dir, e.name);
+      if (await exists(await join(child, "data.json"))) candidates.push(child);
+      else await scan(child, depth + 1);
+    }
+  };
+  await scan(root, 1);
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length > 1) {
+    throw new Error(`所选文件夹下有多个数据目录，请直接选择其中之一：${candidates.join(" 、")}`);
+  }
+  throw new Error("所选文件夹里没有找到数据目录（需包含 data.json 与 assets 文件夹）。请选择另一台机器拷来的 data / 错题本 文件夹本身");
+}
 
 interface Plan {
   sourceDir: string;
@@ -26,15 +57,12 @@ export function MergeImport() {
   const pick = async () => {
     setErr("");
     setResult(null);
-    const res = await openDialog({ directory: true, title: "选择另一份错题本数据目录（包含 data.json）" });
+    const res = await openDialog({ directory: true, title: "选择其他机器拷来的数据文件夹（data.json + assets）" });
     if (typeof res !== "string" || !res) return;
     setBusy(true);
     try {
-      if (!(await exists(await join(res, "data.json")))) {
-        setErr("所选文件夹里没有 data.json——请选择错题本的数据目录（data.json + assets 所在的文件夹）");
-        return;
-      }
-      const source = await loadDb(res);
+      const sourceDir = await findDataDir(res);
+      const source = await loadDb(sourceDir);
       if (source.mistakes.length === 0) {
         setErr("该数据目录里没有错题数据");
         return;
@@ -45,7 +73,7 @@ export function MergeImport() {
       for (const m of newMistakes)
         for (const b of [...m.question, ...m.analysis]) if (b.type === "image") imgs.add(`${b.hash}.${b.ext}`);
       setPlan({
-        sourceDir: res,
+        sourceDir,
         source,
         newMistakes,
         skipped: source.mistakes.length - newMistakes.length,
@@ -124,8 +152,8 @@ export function MergeImport() {
     <div className="page-card" style={{ marginTop: 16 }}>
       <div className="page-label">或：从另一份错题本数据目录合并</div>
       <p className="muted">
-        选择包含 data.json 的数据目录（旧备份、其他设备的数据），题目、文件夹、标签整体合并进来；
-        已导入过的自动跳过，图片按内容哈希去重，可重复执行不会产生重复。
+        把其他机器的数据文件夹拷过来（U 盘、网盘、聊天传输都行），选择它即可，题目、文件夹、标签整体合并进来。
+        选到上一级也没关系，会自动向下识别（最多两层）；已导入过的自动跳过，图片按内容哈希去重，可重复执行。
       </p>
       {result ? (
         <div className="row-actions spread">
