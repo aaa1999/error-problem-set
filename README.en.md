@@ -35,11 +35,31 @@ Then run `npm install && npm run tauri build`. Outputs:
 - **Entry**: separate text+image editors for question and analysis; insert as many images as you like, laid out in insertion order (hover an image to reorder ↑↓ or delete ✕)
 - **Five ways to import images**: paste screenshots from the clipboard (multiple at once) · drag & drop files · 📎 file dialog (multi-select, keeps selection order) · type/paste paths (multiple, comma/newline separated) · paste image files copied from Finder/Explorer
 - **Batch import**: recursively scan a folder, natural-sorted by filename; each image becomes a new question or an "analysis ↩" merged into the previous question *of the same folder*; by default subfolders are auto-created mirroring the source structure (or assign a target folder per group); apply one set of tags to everything
-- **Merge data folders**: merge another Error-Notebook data folder (data.json + assets — an old backup, or data from another device) into the current one — items, folders and tags all migrate; folders merge by name, images dedupe by content hash, already-imported items are skipped, safe to re-run
+- **Merge data folders**: merge another Error-Notebook data folder (data.json + assets — an old backup, or data from another device) into the current one — items, notes, folders and tags all migrate; folders merge by name, images dedupe by content hash, already-imported items are skipped, safe to re-run
 - **Flip browsing**: one item per page, analysis blurred by default (think first, then reveal), arrow keys / swipe navigation, click to zoom images
 - **Folder management**: multi-level folder tree in the sidebar (create / rename / delete / add subfolder), browsing a folder includes its subfolders, one-click move for the current item
 - **Multiple tags** per item; sidebar tag filtering is multi-select with an AND/OR toggle; folder × tag filters combine, with counts updating live on both sides
 - Editing an existing item **auto-saves** ~1s after you stop typing
+
+## Notes (v0.6)
+
+Open the "📝 Notes" tab in the top bar; notes share the same data folder as mistakes (data.json + assets). Notes list on the left (search, excerpts, format badge), editor on the right:
+
+- **Two writing formats**, chosen when creating:
+  - **Markdown**: edit / split / preview modes — split view renders **live as you type**; GFM tables and task lists supported; Enter auto-continues list prefixes; toolbar for bold/italic/inline-code/quote
+  - **Word rich text**: WYSIWYG toolbar with heading levels, bold/italic/underline/strikethrough, ordered/unordered lists, quote, divider, clear-formatting; paste rich text straight from web pages or Word
+- **Images anywhere**: both editors support **pasting screenshots, dropping image files**, and the 📎 file picker; images share the assets folder with mistakes and dedupe by content hash
+- **Export**: any note exports to **PDF** (A4 paginated) or **Word document** (.doc with embedded images, opens directly in Word/WPS)
+- **Auto-save** ~1s after typing stops, `Ctrl/⌘ + S` to save immediately; unsaved-changes flush on navigation, and a brand-new empty note is discarded instead of written
+
+## Remote sync (v0.7)
+
+The "☁ Sync" button in the top bar pushes the whole library to a self-hosted server (enter `ip:port`, optionally "remember this address", re-enter anytime):
+
+- **Incremental upload**: images are named by content hash — the client first asks the server which images it already has and **uploads only the missing ones**; `data.json` is pushed in full each time (a few KB, instant)
+- **Idempotent & resumable**: interrupted syncs resume on retry — already-uploaded images are skipped; safe to repeat anytime
+- Optional access token (`X-Sync-Token`); per-image progress with an abort button while syncing
+- The server only needs 3 HTTP endpoints — see **[docs/sync-protocol.md](./docs/sync-protocol.md)** for the API spec (curl examples); a zero-dependency Python implementation ships in **[backend/sync_server.py](./backend/sync_server.py)** (deployment guide in [backend/README.md](./backend/README.md)) — one command to start
 
 ## Shortcuts (browse mode)
 
@@ -50,6 +70,7 @@ Then run `npm install && npm run tauri build`. Outputs:
 | `E` | edit current item |
 | `N` | new item |
 | `Ctrl/⌘ + Enter` (entry mode) | save |
+| `Ctrl/⌘ + S` (note editing) | save note now |
 
 ## Data folder
 
@@ -57,8 +78,8 @@ On first launch you choose a data folder — on Windows the suggested default is
 
 ```
 data folder/
-├── data.json      # all items (text + image references)
-├── assets/        # image files, named by content hash, auto-deduplicated
+├── data.json      # all items and notes (text + image references)
+├── assets/        # image files, named by content hash, auto-deduplicated (shared by mistakes and notes)
 └── snapshots/     # rolling history of data.json, last 20 kept
 ```
 

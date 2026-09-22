@@ -29,3 +29,6 @@ src-tauri/gen/schemas
 
 # 应用运行时数据（错题数据目录，选在本仓库内时不纳入版本管理）
 data/
+
+# ZCode 本地会话数据
+.zcode/

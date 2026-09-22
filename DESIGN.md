@@ -236,15 +236,7 @@ v1 旧数据打开时自动迁移：补 `folders: []`、`folderId: null`，下�
 - Windows 路径加固：`fileSrc()` 统一把路径分隔符归一为 `/` 再转 asset URL，图片显示与批量缩略图共用
 - Windows 编译环境：Node ≥18 + Rust MSVC + VS Build Tools（C++ 桌面开发）+ WebView2；推荐 NSIS 安装包
 
-## 9. 笔记模块（占位，v0.4.2）
-
-顶栏新增「笔记」tab，视图为占位页；具体形态待定，候选方向：
-
-1. 随手记：图片+文字混排，复用现有块编辑器与五通道图片导入，按文件夹归类
-2. Markdown 笔记：结构化文字笔记，与错题共用文件夹树
-3. 错题批注：笔记挂在错题上，复习该题时展开
-
-数据模型（notes 表/字段、与文件夹的关系）等形态确定后再设计。
+## 9. 笔记模块
 
 ### 9.1 双一级导航（v0.4.3）
 
@@ -262,3 +254,41 @@ v1 旧数据打开时自动迁移：补 `folders: []`、`folderId: null`，下�
 - **错题**：保留原 id 与时间戳（幂等：id 已存在的跳过，可重复执行），folderId 映射到合并后的目标文件夹
 - store 新增 addMistakes 批量追加；标签随错题自带，无独立标签表
 - v0.5.1：合并入口自动定位数据目录——所选文件夹本身无 data.json 时向下扫描两层（整包拷贝的「错题本」文件夹、含 data/ 的安装目录均可直接选中），找到多个时提示用户选具体目录
+
+### 9.3 笔记编辑与导出（v0.6.0）
+
+**数据模型**（data.json 升 v3，旧版本自动迁移）：
+
+```ts
+interface Note {
+  id: string
+  title: string
+  format: 'markdown' | 'word'   // markdown 存源文本；word 存富文本 HTML
+  content: string               // 图片引用统一为 assets/<hash>.<ext> 相对路径
+  createdAt: number
+  updatedAt: number
+}
+```
+
+- 图片与错题共用 assets（哈希去重）；content 里只存相对引用，显示时换成 asset 协议 URL，序列化时换回来——笔记数据随目录整体迁移/合并不受影响
+- **两种编辑器**：
+  - Markdown（marked 渲染，gfm + breaks）：编辑/分屏/预览三模式，useDeferredValue 保证大文档打字不卡；回车续列表前缀、Tab 缩进、B/I/码/❝ 快捷包裹
+  - Word 富文本（contenteditable + execCommand，styleWithCSS=false 产出语义标签）：标题层级/加粗斜体下划线删除线/列表/引用/分隔线/清除格式；可粘贴网页与 Word 的富文本
+  - 两者都支持粘贴截图、拖入文件、📎 选文件、粘贴访达复制的图片路径（与错题编辑器同套路）
+- **自动保存**：停止输入 800ms 落盘 + Ctrl/⌘+S 立即保存 + 卸载兜底；新建空笔记（无标题无内容无图）不落盘直接丢弃
+- **导出**（jsPDF + html2canvas 按需动态加载，不占启动包体）：
+  - PDF：离屏 A4 宽（794px@96dpi）容器渲染 → html2canvas 2x 位图 → 按 A4 高切片分页；文字为位图
+  - Word：MHTML 格式 .doc——HTML 正文与图片全部 base64 内嵌单个 MIME 文档，Word/WPS 直接打开，不依赖外部图片文件
+- 合并导入同步支持笔记：按 id 幂等去重，笔记引用的图片一并拷贝
+
+## 10. 远程同步（v0.7）：推送上传
+
+顶栏「☁ 同步」→ 弹窗填服务器地址（`ip:端口`，缺 `http://` 自动补；可勾选「记住此地址」存 localStorage 键 `errorbook.sync.server`，随时改填新的）→ 增量推送整库到自建服务端。协议文档（服务端实现规范）见 docs/sync-protocol.md。
+
+- **不打 zip，走哈希差量**：图片本来就按内容哈希命名（assets/<sha1>.<ext>），客户端先 `GET /sync/manifest` 问服务端已有哪些图片，只 `PUT` 缺的，最后 `PUT /sync/data` 推整份 data.json（几 KB）——天然增量、幂等、可续传，服务端零压缩/解压逻辑
+- **服务端落盘即合法数据目录**（data.json + assets/），与本地布局一致，可直接被「合并导入」消费，也为将来「从远程拉取合并」（新端点如 GET /sync/data）留底
+- **网络层**：tauri-plugin-http（前端 fetch 直连，绕过 webview CORS）；capabilities 里 http:default 放开 http/https 任意地址（局域网自建服务场景）
+- **服务端实现**：backend/sync_server.py（Python 标准库零依赖，含状态页 GET /、令牌、原子写），部署说明 backend/README.md；协议规范 docs/sync-protocol.md
+- **实现**：src/lib/sync.ts（协议客户端：地址规范化、清单差量、逐张上传带进度与中止、错误分类——连不上 / 非同步服务（404 或响应非 {assets}）/ 令牌拒绝（401/403）/ 上传失败）；src/components/SyncDialog.tsx（弹窗 UI，复用 modal/import-progress 样式）
+- **中止语义**：图片逐张串行上传，中止只在图片间隙生效；已上传的在下次同步里经 manifest 自动跳过
+- **失败兜底**：本地引用了但文件缺失的图片跳过不阻断（与合并导入口径一致）；data 推送在图片全部完成后才执行，服务端不会拿到引用了却缺图的库（除非本地本来就缺）

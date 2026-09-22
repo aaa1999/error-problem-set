@@ -2,8 +2,9 @@ import { useState } from "react";
 import { join } from "@tauri-apps/api/path";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { copyFile, exists, readDir } from "@tauri-apps/plugin-fs";
-import type { Database, Folder, Mistake } from "../types";
+import type { Database, Folder, Mistake, Note } from "../types";
 import { loadDb } from "../lib/db";
+import { collectAssetRefs } from "../lib/markdown";
 import { useBook } from "../store";
 
 /**
@@ -41,13 +42,15 @@ interface Plan {
   sourceDir: string;
   source: Database;
   newMistakes: Mistake[];
+  newNotes: Note[];
   skipped: number;
+  skippedNotes: number;
   imageCount: number;
 }
 
 /** 从另一份错题本数据目录（含 data.json + assets）整体合并到当前数据目录 */
 export function MergeImport() {
-  const { db, dataDir, addMistakes, findOrCreateFolder } = useBook();
+  const { db, dataDir, addMistakes, addNotes, findOrCreateFolder } = useBook();
   const [plan, setPlan] = useState<Plan | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -63,20 +66,25 @@ export function MergeImport() {
     try {
       const sourceDir = await findDataDir(res);
       const source = await loadDb(sourceDir);
-      if (source.mistakes.length === 0) {
-        setErr("该数据目录里没有错题数据");
+      if (source.mistakes.length === 0 && source.notes.length === 0) {
+        setErr("该数据目录里没有错题或笔记数据");
         return;
       }
       const existing = new Set(db.mistakes.map(m => m.id));
       const newMistakes = source.mistakes.filter(m => !existing.has(m.id));
+      const existingNotes = new Set(db.notes.map(n => n.id));
+      const newNotes = source.notes.filter(n => !existingNotes.has(n.id));
       const imgs = new Set<string>();
       for (const m of newMistakes)
         for (const b of [...m.question, ...m.analysis]) if (b.type === "image") imgs.add(`${b.hash}.${b.ext}`);
+      for (const n of newNotes) for (const ref of collectAssetRefs(n.content)) imgs.add(ref.slice("assets/".length));
       setPlan({
         sourceDir,
         source,
         newMistakes,
+        newNotes,
         skipped: source.mistakes.length - newMistakes.length,
+        skippedNotes: source.notes.length - newNotes.length,
         imageCount: imgs.size,
       });
     } catch (e) {
@@ -90,7 +98,7 @@ export function MergeImport() {
     if (!plan) return;
     setBusy(true);
     setErr("");
-    const total = plan.newMistakes.length + plan.imageCount;
+    const total = plan.newMistakes.length + plan.newNotes.length + plan.imageCount;
     setProgress({ done: 0, total });
     try {
       // 1. 文件夹按「名称+父级」合并（父层先处理，同名复用不重建）
@@ -114,10 +122,11 @@ export function MergeImport() {
         fmap.set(f.id, dst.id);
       }
 
-      // 2. 拷贝缺失的图片（按内容哈希，已存在的跳过）
+      // 2. 拷贝缺失的图片（按内容哈希，已存在的跳过；错题和笔记的引用都算）
       const keys = new Set<string>();
       for (const m of plan.newMistakes)
         for (const b of [...m.question, ...m.analysis]) if (b.type === "image") keys.add(`${b.hash}.${b.ext}`);
+      for (const n of plan.newNotes) for (const ref of collectAssetRefs(n.content)) keys.add(ref.slice("assets/".length));
       let done = 0;
       for (const key of keys) {
         const dstPath = await join(dataDir, "assets", key);
@@ -132,12 +141,16 @@ export function MergeImport() {
         setProgress({ done, total });
       }
 
-      // 3. 错题入册（保留原 id/时间戳，文件夹指向合并后的目标）
+      // 3. 错题与笔记入册（保留原 id/时间戳，错题文件夹指向合并后的目标）
       await addMistakes(plan.newMistakes.map(m => ({ ...m, folderId: m.folderId ? fmap.get(m.folderId) ?? null : null })));
+      done += plan.newMistakes.length;
+      setProgress({ done, total });
+      if (plan.newNotes.length > 0) await addNotes(plan.newNotes);
       setProgress({ done: total, total });
 
       setResult(
-        `合并完成：新导入 ${plan.newMistakes.length} 道，跳过 ${plan.skipped} 道（已存在），` +
+        `合并完成：新导入 ${plan.newMistakes.length} 道错题、${plan.newNotes.length} 篇笔记，` +
+          `跳过 ${plan.skipped} 道错题、${plan.skippedNotes} 篇笔记（已存在），` +
           `${plan.source.folders.length} 个文件夹已按名称合并。`,
       );
       setPlan(null);
@@ -173,11 +186,12 @@ export function MergeImport() {
             </span>
           </div>
         ) : (
-          <div className="row-actions spread">
-            <span className="muted">
-              {plan.source.mistakes.length} 道错题、{plan.source.folders.length} 个文件夹：将导入{" "}
-              {plan.newMistakes.length} 道（含 {plan.imageCount} 张图片），跳过已存在 {plan.skipped} 道
-            </span>
+        <div className="row-actions spread">
+          <span className="muted">
+            {plan.source.mistakes.length} 道错题、{plan.source.notes.length} 篇笔记、{plan.source.folders.length} 个文件夹：将导入{" "}
+            {plan.newMistakes.length} 道错题、{plan.newNotes.length} 篇笔记（含 {plan.imageCount} 张图片），跳过已存在{" "}
+            {plan.skipped} 道、{plan.skippedNotes} 篇
+          </span>
             <span className="row-actions">
               <button className="btn" onClick={() => setPlan(null)}>
                 取消

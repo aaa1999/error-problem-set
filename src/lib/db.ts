@@ -1,12 +1,12 @@
 import { join } from "@tauri-apps/api/path";
 import { copyFile, exists, mkdir, readDir, readTextFile, remove, rename, writeTextFile } from "@tauri-apps/plugin-fs";
-import type { Database, Folder, Mistake } from "../types";
+import type { Database, Folder, Mistake, Note } from "../types";
 
 export function emptyDb(): Database {
-  return { version: 2, mistakes: [], folders: [] };
+  return { version: 3, mistakes: [], folders: [], notes: [] };
 }
 
-/** 容错解析 + 旧版本（v1，无 folders）自动迁移到 v2 */
+/** 容错解析 + 旧版本（v1 无 folders、v2 无 notes）自动迁移到 v3 */
 export function normalizeDb(raw: unknown): Database {
   const r = (raw ?? {}) as Record<string, unknown>;
   const folders: Folder[] = Array.isArray(r.folders)
@@ -32,7 +32,19 @@ export function normalizeDb(raw: unknown): Database {
           updatedAt: Number(m.updatedAt) || Date.now(),
         }))
     : [];
-  return { version: 2, mistakes, folders };
+  const notes: Note[] = Array.isArray(r.notes)
+    ? r.notes
+        .filter((n): n is Record<string, unknown> => !!n && typeof n === "object" && typeof n.id === "string")
+        .map(n => ({
+          id: n.id as string,
+          title: typeof n.title === "string" ? n.title : "",
+          format: n.format === "word" ? "word" : "markdown",
+          content: typeof n.content === "string" ? n.content : "",
+          createdAt: Number(n.createdAt) || Date.now(),
+          updatedAt: Number(n.updatedAt) || Date.now(),
+        }))
+    : [];
+  return { version: 3, mistakes, folders, notes };
 }
 
 export async function ensureDirs(dataDir: string): Promise<void> {

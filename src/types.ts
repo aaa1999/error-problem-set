@@ -31,8 +31,19 @@ export interface Mistake {
   updatedAt: number;
 }
 
+/** 笔记：markdown 格式存源文本，word 格式存富文本 HTML；图片引用 assets/<hash>.<ext> */
+export interface Note {
+  id: string;
+  title: string;
+  format: "markdown" | "word";
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Database {
-  version: 2;
+  version: 3;
   mistakes: Mistake[];
   folders: Folder[];
+  notes: Note[];
 }

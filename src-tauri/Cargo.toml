@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-http = "=2.6.1" # 钉住与 npm 包 @tauri-apps/plugin-http 相同的次版本（tauri build 会校验两侧一致）
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

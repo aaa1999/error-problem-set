@@ -459,34 +459,6 @@ kbd {
   font-size: 14px;
 }
 
-/* ---------- 笔记（占位） ---------- */
-.notes-ideas {
-  max-width: 560px;
-  margin: 10px auto 0;
-  text-align: left;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 18px 24px;
-  line-height: 1.8;
-  font-size: 14px;
-}
-
-.notes-ideas-title {
-  color: var(--muted);
-  font-size: 13px;
-  margin-bottom: 6px;
-}
-
-.notes-ideas ul {
-  margin: 0;
-  padding-left: 20px;
-}
-
-.notes-ideas li {
-  margin: 4px 0;
-}
-
 .browse-foot {
   display: flex;
   align-items: center;
@@ -1176,6 +1148,39 @@ kbd {
   margin-top: 16px;
 }
 
+/* ---------- 同步弹窗 ---------- */
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 12px 0 6px;
+}
+
+.modal-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.modal-check input {
+  accent-color: var(--accent);
+}
+
+.sync-ok {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #eef7ee;
+  color: #2e7d32;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .folder-select {
   border: 1px solid #dcd8cf;
   background: var(--card);
@@ -1201,5 +1206,538 @@ kbd {
   flex: 1;
   min-width: 260px;
   margin-bottom: 0;
+}
+
+/* ---------- 笔记 ---------- */
+.main > .notes-layout {
+  max-width: 1280px;
+}
+
+.notes-layout {
+  display: flex;
+  gap: 18px;
+  align-items: stretch;
+  width: 100%;
+  height: calc(100vh - 56px - 40px);
+}
+
+.notes-side {
+  width: 296px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.notes-side-head {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.notes-side-head .btn {
+  flex: 1;
+}
+
+.notes-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 6px;
+}
+
+.notes-search {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #e3dfd6;
+  background: #faf9f6;
+  outline: none;
+  color: var(--ink);
+  font-family: inherit;
+}
+
+.notes-search:focus {
+  border-color: #b9c6f2;
+}
+
+.notes-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.notes-list-empty {
+  padding: 22px 14px;
+  text-align: center;
+  line-height: 1.7;
+}
+
+.note-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 9px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.note-item:hover {
+  background: #f4f2ec;
+}
+
+.note-item.active {
+  background: var(--accent-weak);
+}
+
+.note-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.note-badge {
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #eef2fd;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.note-badge.word {
+  background: #f0eefb;
+  color: #6f5bd0;
+}
+
+.note-item-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-item.active .note-item-title {
+  color: var(--accent);
+}
+
+.note-item-snippet {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+  max-height: 2.95em;
+  overflow: hidden;
+}
+
+.notes-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.note-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-self: stretch;
+}
+
+/* ---------- 笔记编辑器 ---------- */
+.note-editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.note-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.note-title-input {
+  flex: 1;
+  min-width: 180px;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  font-family: inherit;
+}
+
+.note-title-input::placeholder {
+  color: #b3ada2;
+  font-weight: 400;
+}
+
+.note-save-state {
+  white-space: nowrap;
+}
+
+.note-editor-acts {
+  display: flex;
+  gap: 8px;
+}
+
+.note-export-err {
+  padding: 4px 14px 0;
+}
+
+.note-editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.md-editor,
+.word-editor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.note-toolrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.note-toolrow .tabs {
+  padding-left: 0;
+  border-left: none;
+}
+
+.note-hint {
+  margin-left: auto;
+}
+
+.tool-div {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+  margin: 0 4px;
+}
+
+.wtool {
+  min-width: 30px;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid #dcd8cf;
+  background: var(--card);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--ink);
+  font-family: inherit;
+}
+
+.wtool:hover {
+  background: #f6f4ee;
+}
+
+.word-block-select {
+  border: 1px solid #dcd8cf;
+  background: var(--card);
+  border-radius: 7px;
+  height: 28px;
+  padding: 0 4px;
+  font-size: 12.5px;
+  color: var(--ink);
+  outline: none;
+  font-family: inherit;
+}
+
+.md-panes {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.md-panes.mode-edit,
+.md-panes.mode-preview {
+  grid-template-columns: 1fr;
+}
+
+.md-src {
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 16px 18px;
+  background: #fcfbf7;
+  border-right: 1px solid var(--line);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--ink);
+  overflow-y: auto;
+}
+
+.md-panes.mode-edit .md-src {
+  border-right: none;
+}
+
+.md-preview {
+  overflow-y: auto;
+  padding: 18px 22px;
+}
+
+.word-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 26px;
+  outline: none;
+}
+
+.word-body:empty::before {
+  content: attr(data-placeholder);
+  color: #b3ada2;
+}
+
+/* ---------- 富文本排版（markdown 预览 / word 编辑区共用） ---------- */
+.rich-text {
+  font-size: 15.5px;
+  line-height: 1.75;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.rich-text h1,
+.rich-text h2,
+.rich-text h3,
+.rich-text h4 {
+  margin: 20px 0 10px;
+  line-height: 1.35;
+}
+
+.rich-text > :first-child {
+  margin-top: 0;
+}
+
+.rich-text h1 {
+  font-size: 24px;
+}
+
+.rich-text h2 {
+  font-size: 20px;
+}
+
+.rich-text h3 {
+  font-size: 17px;
+}
+
+.rich-text h4 {
+  font-size: 15.5px;
+}
+
+.rich-text p {
+  margin: 0 0 10px;
+}
+
+.rich-text ul,
+.rich-text ol {
+  margin: 0 0 10px;
+  padding-left: 24px;
+}
+
+.rich-text li {
+  margin: 3px 0;
+}
+
+.rich-text li > input[type="checkbox"] {
+  margin-right: 6px;
+}
+
+.rich-text code {
+  background: #f1efe9;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.rich-text pre {
+  background: #f7f6f1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 10px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+.rich-text pre code {
+  background: none;
+  padding: 0;
+  font-size: 13px;
+}
+
+.rich-text blockquote {
+  margin: 0 0 10px;
+  padding: 4px 14px;
+  border-left: 3px solid #d8d4ca;
+  color: #6b665c;
+}
+
+.rich-text table {
+  border-collapse: collapse;
+  margin: 0 0 12px;
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+}
+
+.rich-text th,
+.rich-text td {
+  border: 1px solid #d8d4ca;
+  padding: 5px 10px;
+  font-size: 14px;
+  text-align: left;
+}
+
+.rich-text th {
+  background: #f7f6f1;
+}
+
+.rich-text img {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 6px 0;
+}
+
+.rich-text hr {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 16px 0;
+}
+
+.rich-text a {
+  color: var(--accent);
+}
+
+/* ---------- 导出用的离屏渲染容器（A4 宽 794px @96dpi） ---------- */
+.note-print {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 794px;
+  padding: 56px 52px;
+  background: #ffffff;
+  color: #111111;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  font-size: 15px;
+  line-height: 1.75;
+  word-break: break-word;
+}
+
+.note-print h1,
+.note-print h2,
+.note-print h3,
+.note-print h4 {
+  margin: 20px 0 10px;
+  line-height: 1.35;
+}
+
+.note-print h1 {
+  font-size: 24px;
+}
+
+.note-print h2 {
+  font-size: 20px;
+}
+
+.note-print h3 {
+  font-size: 17px;
+}
+
+.note-print p {
+  margin: 0 0 10px;
+}
+
+.note-print ul,
+.note-print ol {
+  margin: 0 0 10px;
+  padding-left: 24px;
+}
+
+.note-print code {
+  background: #f1efe9;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.note-print pre {
+  background: #f7f6f1;
+  border: 1px solid #e3dfd6;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 10px;
+  white-space: pre-wrap;
+}
+
+.note-print blockquote {
+  margin: 0 0 10px;
+  padding: 4px 14px;
+  border-left: 3px solid #d8d4ca;
+  color: #6b665c;
+}
+
+.note-print table {
+  border-collapse: collapse;
+  margin: 0 0 12px;
+  max-width: 100%;
+}
+
+.note-print th,
+.note-print td {
+  border: 1px solid #d8d4ca;
+  padding: 5px 10px;
+  font-size: 14px;
+}
+
+.note-print img {
+  max-width: 100%;
+}
+
+.note-print hr {
+  border: none;
+  border-top: 1px solid #e3dfd6;
+  margin: 16px 0;
 }
 

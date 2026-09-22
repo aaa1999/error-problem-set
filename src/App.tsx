@@ -7,6 +7,7 @@ import { EntryView } from "./views/EntryView";
 import { BatchImportView } from "./views/BatchImportView";
 import { WelcomeView } from "./views/WelcomeView";
 import { NotesView } from "./views/NotesView";
+import { SyncDialog } from "./components/SyncDialog";
 
 /** 错题本内部的二级视图 */
 type View = { name: "browse" } | { name: "entry"; editId?: string } | { name: "batch" };
@@ -20,6 +21,7 @@ export default function App() {
   // 浏览页当前选中的文件夹："" 全部 | "uncat" 未分类 | 文件夹 id；也作为录入/批量导入的默认文件夹
   const [folderSel, setFolderSel] = useState<string>("");
   const defaultFolderId = folderSel !== "" && folderSel !== "uncat" ? folderSel : null;
+  const [syncOpen, setSyncOpen] = useState(false);
 
   if (status === "welcome") return <WelcomeView />;
   if (status !== "ready") {
@@ -66,8 +68,11 @@ export default function App() {
         )}
         <div className="topbar-right">
           <span className="muted" title={dataDir}>
-            {shortDir(dataDir)} · {db.mistakes.length} 题
+            {shortDir(dataDir)} · {db.mistakes.length} 题 · {db.notes.length} 笔记
           </span>
+          <button className="btn btn-sm" onClick={() => setSyncOpen(true)}>
+            ☁ 同步
+          </button>
           <button className="btn btn-sm" onClick={() => void changeDir()}>
             更换目录
           </button>
@@ -102,6 +107,8 @@ export default function App() {
           </>
         )}
       </main>
+
+      {syncOpen && <SyncDialog onClose={() => setSyncOpen(false)} />}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { join } from "@tauri-apps/api/path";
-import type { Database, Folder, ImageBlock, Mistake } from "./types";
+import type { Database, Folder, ImageBlock, Mistake, Note } from "./types";
 import { emptyDb, ensureDirs, loadDb, saveDb } from "./lib/db";
 import { assetUrlFor } from "./lib/images";
 import { naturalCompare, uuid } from "./lib/utils";
@@ -31,6 +31,11 @@ export interface Book {
   renameFolder: (id: string, name: string) => Promise<void>;
   /** 删除文件夹：其中错题移到未分类，子文件夹上移一级 */
   deleteFolder: (id: string) => Promise<void>;
+  addNote: (n: Note) => Promise<void>;
+  updateNote: (n: Note) => Promise<void>;
+  deleteNote: (id: string) => Promise<void>;
+  /** 批量追加笔记（数据目录合并用），跳过已存在的 id，返回实际新增数 */
+  addNotes: (ns: Note[]) => Promise<number>;
 }
 
 const BookCtx = createContext<Book | null>(null);
@@ -174,6 +179,41 @@ export function BookProvider({ children }: { children: ReactNode }) {
     [persist],
   );
 
+  const addNote = useCallback(
+    async (n: Note) => {
+      const cur = dbRef.current;
+      await persist({ ...cur, notes: [...cur.notes, n] });
+    },
+    [persist],
+  );
+
+  const updateNote = useCallback(
+    async (n: Note) => {
+      const cur = dbRef.current;
+      await persist({ ...cur, notes: cur.notes.map(x => (x.id === n.id ? n : x)) });
+    },
+    [persist],
+  );
+
+  const deleteNote = useCallback(
+    async (id: string) => {
+      const cur = dbRef.current;
+      await persist({ ...cur, notes: cur.notes.filter(x => x.id !== id) });
+    },
+    [persist],
+  );
+
+  const addNotes = useCallback(
+    async (ns: Note[]) => {
+      const cur = dbRef.current;
+      const ids = new Set(cur.notes.map(n => n.id));
+      const add = ns.filter(n => !ids.has(n.id));
+      if (add.length > 0) await persist({ ...cur, notes: [...cur.notes, ...add] });
+      return add.length;
+    },
+    [persist],
+  );
+
   const tagCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const x of db.mistakes) for (const t of x.tags) m.set(t, (m.get(t) ?? 0) + 1);
@@ -202,6 +242,10 @@ export function BookProvider({ children }: { children: ReactNode }) {
       findOrCreateFolder,
       renameFolder,
       deleteFolder,
+      addNote,
+      updateNote,
+      deleteNote,
+      addNotes,
     }),
     [
       status,
@@ -221,6 +265,10 @@ export function BookProvider({ children }: { children: ReactNode }) {
       findOrCreateFolder,
       renameFolder,
       deleteFolder,
+      addNote,
+      updateNote,
+      deleteNote,
+      addNotes,
     ],
   );
 
