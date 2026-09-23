@@ -2,9 +2,8 @@ import { useState } from "react";
 import { join } from "@tauri-apps/api/path";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { copyFile, exists, readDir } from "@tauri-apps/plugin-fs";
-import type { Database, Folder, Mistake, Note } from "../types";
 import { loadDb } from "../lib/db";
-import { collectAssetRefs } from "../lib/markdown";
+import { executeMerge, mergeOutcomeText, planMerge, type MergePlan } from "../lib/merge";
 import { useBook } from "../store";
 
 /**
@@ -40,17 +39,12 @@ async function findDataDir(root: string): Promise<string> {
 
 interface Plan {
   sourceDir: string;
-  source: Database;
-  newMistakes: Mistake[];
-  newNotes: Note[];
-  skipped: number;
-  skippedNotes: number;
-  imageCount: number;
+  core: MergePlan;
 }
 
 /** 从另一份错题本数据目录（含 data.json + assets）整体合并到当前数据目录 */
 export function MergeImport() {
-  const { db, dataDir, addMistakes, addNotes, findOrCreateFolder } = useBook();
+  const { db, dataDir, addMistakes, addNotes, addTags, addPendingImports, findOrCreateFolder } = useBook();
   const [plan, setPlan] = useState<Plan | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -70,23 +64,7 @@ export function MergeImport() {
         setErr("该数据目录里没有错题或笔记数据");
         return;
       }
-      const existing = new Set(db.mistakes.map(m => m.id));
-      const newMistakes = source.mistakes.filter(m => !existing.has(m.id));
-      const existingNotes = new Set(db.notes.map(n => n.id));
-      const newNotes = source.notes.filter(n => !existingNotes.has(n.id));
-      const imgs = new Set<string>();
-      for (const m of newMistakes)
-        for (const b of [...m.question, ...m.analysis]) if (b.type === "image") imgs.add(`${b.hash}.${b.ext}`);
-      for (const n of newNotes) for (const ref of collectAssetRefs(n.content)) imgs.add(ref.slice("assets/".length));
-      setPlan({
-        sourceDir,
-        source,
-        newMistakes,
-        newNotes,
-        skipped: source.mistakes.length - newMistakes.length,
-        skippedNotes: source.notes.length - newNotes.length,
-        imageCount: imgs.size,
-      });
+      setPlan({ sourceDir, core: planMerge(db, source) });
     } catch (e) {
       setErr(`读取失败：${String(e)}`);
     } finally {
@@ -98,61 +76,27 @@ export function MergeImport() {
     if (!plan) return;
     setBusy(true);
     setErr("");
-    const total = plan.newMistakes.length + plan.newNotes.length + plan.imageCount;
-    setProgress({ done: 0, total });
     try {
-      // 1. 文件夹按「名称+父级」合并（父层先处理，同名复用不重建）
-      const byId = new Map(plan.source.folders.map(f => [f.id, f]));
-      const depthOf = (f: Folder): number => {
-        let d = 0;
-        let p = f.parentId;
-        let guard = 0;
-        while (p && guard++ < 64) {
-          const par = byId.get(p);
-          if (!par) break;
-          d++;
-          p = par.parentId;
-        }
-        return d;
-      };
-      const sorted = [...plan.source.folders].sort((a, b) => depthOf(a) - depthOf(b));
-      const fmap = new Map<string, string>();
-      for (const f of sorted) {
-        const dst = await findOrCreateFolder(f.name, f.parentId ? fmap.get(f.parentId) ?? null : null);
-        fmap.set(f.id, dst.id);
-      }
-
-      // 2. 拷贝缺失的图片（按内容哈希，已存在的跳过；错题和笔记的引用都算）
-      const keys = new Set<string>();
-      for (const m of plan.newMistakes)
-        for (const b of [...m.question, ...m.analysis]) if (b.type === "image") keys.add(`${b.hash}.${b.ext}`);
-      for (const n of plan.newNotes) for (const ref of collectAssetRefs(n.content)) keys.add(ref.slice("assets/".length));
-      let done = 0;
-      for (const key of keys) {
-        const dstPath = await join(dataDir, "assets", key);
-        if (!(await exists(dstPath))) {
+      const outcome = await executeMerge(plan.core, {
+        // 本地已有（哈希一致）直接算到位；缺的从源目录拷，源里也缺则保留引用跳过
+        fetchAsset: async key => {
+          const dstPath = await join(dataDir, "assets", key);
+          if (await exists(dstPath)) return true;
           try {
             await copyFile(await join(plan.sourceDir, "assets", key), dstPath);
+            return true;
           } catch {
-            // 源目录里也缺这张图，保留引用但跳过拷贝
+            return false;
           }
-        }
-        done++;
-        setProgress({ done, total });
-      }
-
-      // 3. 错题与笔记入册（保留原 id/时间戳，错题文件夹指向合并后的目标）
-      await addMistakes(plan.newMistakes.map(m => ({ ...m, folderId: m.folderId ? fmap.get(m.folderId) ?? null : null })));
-      done += plan.newMistakes.length;
-      setProgress({ done, total });
-      if (plan.newNotes.length > 0) await addNotes(plan.newNotes);
-      setProgress({ done: total, total });
-
-      setResult(
-        `合并完成：新导入 ${plan.newMistakes.length} 道错题、${plan.newNotes.length} 篇笔记，` +
-          `跳过 ${plan.skipped} 道错题、${plan.skippedNotes} 篇笔记（已存在），` +
-          `${plan.source.folders.length} 个文件夹已按名称合并。`,
-      );
+        },
+        findOrCreateFolder,
+        addMistakes,
+        addNotes,
+        addTags,
+        addPendingImports,
+        onProgress: (done, total) => setProgress({ done, total }),
+      });
+      setResult(mergeOutcomeText(plan.core, outcome));
       setPlan(null);
     } catch (e) {
       setErr(`合并中断：${String(e)}（可重新执行，已导入的会自动跳过）`);
@@ -188,9 +132,10 @@ export function MergeImport() {
         ) : (
         <div className="row-actions spread">
           <span className="muted">
-            {plan.source.mistakes.length} 道错题、{plan.source.notes.length} 篇笔记、{plan.source.folders.length} 个文件夹：将导入{" "}
-            {plan.newMistakes.length} 道错题、{plan.newNotes.length} 篇笔记（含 {plan.imageCount} 张图片），跳过已存在{" "}
-            {plan.skipped} 道、{plan.skippedNotes} 篇
+            {plan.core.source.mistakes.length} 道错题、{plan.core.source.notes.length} 篇笔记、{plan.core.source.folders.length} 个文件夹：将导入{" "}
+            {plan.core.newMistakes.length} 道错题、{plan.core.newNotes.length} 篇笔记（含 {plan.core.assetKeys.length} 张图片）
+            {plan.core.newTags.length > 0 ? `、${plan.core.newTags.length} 个标签` : ""}，跳过已存在{" "}
+            {plan.core.skipped} 道、{plan.core.skippedNotes} 篇
           </span>
             <span className="row-actions">
               <button className="btn" onClick={() => setPlan(null)}>

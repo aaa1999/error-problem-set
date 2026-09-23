@@ -467,6 +467,34 @@ kbd {
   gap: 12px;
 }
 
+/* 排列方式切换（时间/随机）：紧凑分段按钮 */
+.order-switch {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.order-switch .seg {
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  padding: 3px 9px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.order-switch .seg:hover {
+  background: #f1efe9;
+}
+
+.order-switch .seg.on {
+  background: var(--accent-weak);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .anim-next {
   animation: slide-from-right 0.28s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
@@ -884,6 +912,440 @@ kbd {
   gap: 10px;
 }
 
+/* 拖放：可落目标高亮（错题/文件夹拖到侧栏时） */
+.side-item.drop-target {
+  background: var(--accent-weak);
+  outline: 1.5px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.folder-row {
+  cursor: grab;
+}
+
+.folder-row:active {
+  cursor: grabbing;
+}
+
+/* ---------- 录入：选择题选项编辑器 ---------- */
+.options-editor {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.options-editor .page-label {
+  margin-bottom: 0;
+}
+
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A/B/C/D 字母徽章：点击即选中为正确答案（实心高亮） */
+.option-letter-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  background: var(--card);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.option-letter-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.option-letter-btn.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.option-input {
+  flex: 1;
+  padding: 6px 10px;
+}
+
+/* ---------- 浏览：选择题作答 ---------- */
+.opt-block {
+  margin: 12px 0 4px;
+}
+
+.opt-head {
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--muted);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.opt-rate {
+  letter-spacing: normal;
+  font-weight: 600;
+}
+
+.opt-rate.good {
+  color: #2e7d32;
+}
+
+.opt-rate.bad {
+  color: #c62828;
+}
+
+.opt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.opt-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 14px;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.opt-item:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.opt-item:disabled {
+  cursor: default;
+}
+
+.opt-item .opt-letter {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.opt-item.correct {
+  border-color: #2e7d32;
+  background: #eef7ee;
+}
+
+.opt-item.correct .opt-letter {
+  border-color: #2e7d32;
+  color: #2e7d32;
+}
+
+.opt-item.wrong-pick {
+  border-color: #c62828;
+  background: #fdecea;
+}
+
+.opt-item.wrong-pick .opt-letter {
+  border-color: #c62828;
+  color: #c62828;
+}
+
+.opt-mark {
+  margin-left: auto;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* 筛选条件栏的一键重置 */
+.tag-chip.reset-chip {
+  border-style: dashed;
+  color: #c62828;
+}
+
+/* 复制菜单：点「复制 ▾」向上弹出两个选项（只复制题目 / 复制全部） */
+.copy-menu {
+  position: relative;
+}
+
+.copy-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.14);
+  padding: 6px;
+  width: max-content;
+  max-width: min(340px, 90vw);
+  display: flex;
+  flex-direction: column;
+}
+
+.copy-pop button {
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.copy-pop button:hover {
+  background: #f1efe9;
+  color: var(--accent);
+}
+
+/* ---------- 做题 tab：答题卡 ---------- */
+.practice {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.prac-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.prac-head .page-label {
+  margin-bottom: 4px;
+}
+
+.prac-count {
+  width: 90px;
+}
+
+.prac-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prac-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: 10px;
+}
+
+.prac-row.bad {
+  background: #fdecea;
+}
+
+.prac-no {
+  flex-shrink: 0;
+  width: 34px;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--muted);
+  text-align: right;
+}
+
+.prac-opts {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.prac-opt {
+  width: 34px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.prac-opt:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.prac-opt.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.prac-flag {
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  cursor: pointer;
+  filter: grayscale(1);
+  opacity: 0.45;
+  padding: 2px 4px;
+}
+
+.prac-flag.on {
+  filter: none;
+  opacity: 1;
+}
+
+.prac-mine {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.prac-mine.ok {
+  color: #2e7d32;
+}
+
+.prac-mine.bad {
+  color: #c62828;
+}
+
+/* 来自手机的待导入清单卡片 */
+.pending-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pending-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.pending-title {
+  font-size: 13.5px;
+  margin-bottom: 4px;
+}
+
+.pending-nos {
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* 结果页的导入勾选 */
+.prac-check {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.prac-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* 对答案阶段的批量导入 */
+.prac-bulk {
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.prac-bulk-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  resize: vertical;
+  min-height: 84px;
+  line-height: 1.6;
+}
+
+.prac-suggest {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.prac-verdict {
+  font-size: 13.5px;
+}
+
+.prac-imported {
+  margin-left: auto;
+  color: #2e7d32;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.prac-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.prac-cell {
+  width: 34px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.prac-cell.correct {
+  background: #eef7ee;
+  border-color: #2e7d32;
+  color: #2e7d32;
+}
+
+.prac-cell.wrong {
+  background: #fdecea;
+  border-color: #c62828;
+  color: #c62828;
+}
+
+.prac-cell.blank {
+  border-style: dashed;
+}
+
+.prac-cell.imported {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.prac-cell.flagged {
+  border-color: #e6a700;
+  color: #b8860b;
+}
+
 .side-tag.dim {
   opacity: 0.45;
 }
@@ -1171,6 +1633,20 @@ kbd {
   accent-color: var(--accent);
 }
 
+/* 同步弹窗的模式切换行：复用全局 .tab / .tab.active 药丸样式 */
+.sync-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.sync-tabs .tab:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .sync-ok {
   margin-top: 10px;
   padding: 8px 10px;
@@ -1191,6 +1667,93 @@ kbd {
   outline: none;
   max-width: 280px;
   font-family: inherit;
+}
+
+/* 文件夹多选（弹层复选树） */
+.folder-select-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.folder-select-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dcd8cf;
+  background: var(--card);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13.5px;
+  color: var(--ink);
+  cursor: pointer;
+  max-width: 280px;
+  font-family: inherit;
+}
+
+.folder-select-btn:hover {
+  border-color: var(--accent);
+}
+
+.folder-select-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-select-caret {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.folder-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.14);
+  padding: 6px;
+  width: min(320px, 90vw);
+  max-height: 320px;
+  overflow: auto;
+}
+
+.folder-pop-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13.5px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.folder-pop-row:hover {
+  background: #f1efe9;
+}
+
+.folder-pop-row.on {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.folder-pop-check {
+  width: 14px;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.folder-pop-empty,
+.folder-pop-tip {
+  padding: 6px 10px;
+  font-size: 12px;
 }
 
 /* ---------- 录入/批量：文件夹 + 标签一行 ---------- */

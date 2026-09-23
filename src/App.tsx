@@ -7,12 +7,13 @@ import { EntryView } from "./views/EntryView";
 import { BatchImportView } from "./views/BatchImportView";
 import { WelcomeView } from "./views/WelcomeView";
 import { NotesView } from "./views/NotesView";
+import { PracticeView, type PracticeSession } from "./views/PracticeView";
 import { SyncDialog } from "./components/SyncDialog";
 
 /** 错题本内部的二级视图 */
 type View = { name: "browse" } | { name: "entry"; editId?: string } | { name: "batch" };
 /** 顶部一级导航 */
-type TopMode = "book" | "notes";
+type TopMode = "book" | "notes" | "practice";
 
 export default function App() {
   const { status, dataDir, db, chooseDataDir } = useBook();
@@ -22,6 +23,8 @@ export default function App() {
   const [folderSel, setFolderSel] = useState<string>("");
   const defaultFolderId = folderSel !== "" && folderSel !== "uncat" ? folderSel : null;
   const [syncOpen, setSyncOpen] = useState(false);
+  // 做题会话提升到 App 层：切 tab 不丢答题进度
+  const [practice, setPractice] = useState<PracticeSession | null>(null);
 
   if (status === "welcome") return <WelcomeView />;
   if (status !== "ready") {
@@ -51,6 +54,9 @@ export default function App() {
           </button>
           <button className={`tab tab-main ${top === "notes" ? "active" : ""}`} onClick={() => setTop("notes")}>
             📝 笔记
+          </button>
+          <button className={`tab tab-main ${top === "practice" ? "active" : ""}`} onClick={() => setTop("practice")}>
+            ✍️ 做题
           </button>
         </nav>
         {top === "book" && (
@@ -82,6 +88,8 @@ export default function App() {
       <main className="main">
         {top === "notes" ? (
           <NotesView />
+        ) : top === "practice" ? (
+          <PracticeView session={practice} setSession={setPractice} />
         ) : (
           <>
             {view.name === "browse" && (

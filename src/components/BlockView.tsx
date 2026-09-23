@@ -20,6 +20,7 @@ export function BlockView({ blocks, onImageClick }: { blocks: Block[]; onImageCl
             src={assetSrc(b)}
             alt=""
             loading="lazy"
+            draggable={false}
             onClick={() => onImageClick?.(b)}
           />
         ),

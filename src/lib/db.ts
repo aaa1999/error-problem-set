@@ -1,9 +1,9 @@
 import { join } from "@tauri-apps/api/path";
 import { copyFile, exists, mkdir, readDir, readTextFile, remove, rename, writeTextFile } from "@tauri-apps/plugin-fs";
-import type { Database, Folder, Mistake, Note } from "../types";
+import type { Database, Folder, Mistake, Note, PendingImport } from "../types";
 
 export function emptyDb(): Database {
-  return { version: 3, mistakes: [], folders: [], notes: [] };
+  return { version: 3, mistakes: [], folders: [], notes: [], tags: [], pendingImports: [] };
 }
 
 /** 容错解析 + 旧版本（v1 无 folders、v2 无 notes）自动迁移到 v3 */
@@ -24,7 +24,17 @@ export function normalizeDb(raw: unknown): Database {
         .filter((m): m is Record<string, unknown> => !!m && typeof m === "object" && typeof m.id === "string" && Array.isArray(m.question))
         .map(m => ({
           id: m.id as string,
-          folderId: typeof m.folderId === "string" ? m.folderId : null,
+          // 新格式 folderIds[]；旧格式单个 folderId 自动迁移成一项，都没有 = 未分类
+          folderIds: Array.isArray(m.folderIds)
+            ? (m.folderIds as unknown[]).map(String).filter(Boolean)
+            : typeof m.folderId === "string" && m.folderId
+              ? [m.folderId]
+              : [],
+          // 选择题选项 + 作答统计（旧数据没有这些字段，按空/0 处理）
+          options: Array.isArray(m.options) ? (m.options as unknown[]).map(String).filter(Boolean) : [],
+          answer: typeof m.answer === "number" && Number.isInteger(m.answer) && m.answer >= 0 ? m.answer : null,
+          attempts: Math.max(0, Number(m.attempts) || 0),
+          wrong: Math.max(0, Number(m.wrong) || 0),
           question: m.question as Mistake["question"],
           analysis: Array.isArray(m.analysis) ? (m.analysis as Mistake["analysis"]) : [],
           tags: Array.isArray(m.tags) ? (m.tags as unknown[]).map(String) : [],
@@ -44,7 +54,33 @@ export function normalizeDb(raw: unknown): Database {
           updatedAt: Number(n.updatedAt) || Date.now(),
         }))
     : [];
-  return { version: 3, mistakes, folders, notes };
+  // 预建独立标签：旧数据没有该字段时按空处理（v3 内的可选增量字段）
+  const tags: string[] = Array.isArray(r.tags)
+    ? [...new Set((r.tags as unknown[]).map(String).filter(Boolean))]
+    : [];
+  // 待导入清单（做题 tab 产生）：旧数据没有该字段按空处理
+  const pendingImports: PendingImport[] = Array.isArray(r.pendingImports)
+    ? ((r.pendingImports as unknown[]).filter(
+        (p): p is Record<string, unknown> => !!p && typeof p === "object" && typeof (p as Record<string, unknown>).id === "string",
+      ) as Record<string, unknown>[])
+        .map(p => ({
+          id: p.id as string,
+          folderName: typeof p.folderName === "string" ? p.folderName : "",
+          createdAt: Number(p.createdAt) || Date.now(),
+          total: Number(p.total) || 0,
+          entries: Array.isArray(p.entries)
+            ? (p.entries as Record<string, unknown>[])
+                .filter(e => !!e && typeof (e as Record<string, unknown>).no === "number")
+                .map(e => ({
+                  no: Number(e.no),
+                  mine: typeof e.mine === "string" ? e.mine : null,
+                  key: typeof e.key === "string" ? e.key : null,
+                  flagged: e.flagged === true,
+                }))
+            : [],
+        }))
+    : [];
+  return { version: 3, mistakes, folders, notes, tags, pendingImports };
 }
 
 export async function ensureDirs(dataDir: string): Promise<void> {

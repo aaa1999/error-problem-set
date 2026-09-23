@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type DragEvent } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import type { Folder, Mistake } from "../types";
-import { countInFolder, countUncategorized, groupByParent } from "../lib/folders";
+import { countInFolder, countUncategorized, descendantSet, groupByParent } from "../lib/folders";
+import { DND_FOLDER, DND_MISTAKE } from "../lib/dnd";
 import { useBook } from "../store";
 import { NameModal } from "./NameModal";
 
@@ -30,8 +31,14 @@ export function Sidebar({
   mistakesInFolder,
   mistakesMatchingTags,
 }: Props) {
-  const { db, allTags, createFolder, renameFolder, deleteFolder } = useBook();
-  const [modal, setModal] = useState<{ title: string; initial: string; onOk: (name: string) => void } | null>(null);
+  const { db, allTags, createFolder, renameFolder, moveFolder, deleteFolder, createTag, getMistake, setMistakeFolders } =
+    useBook();
+  const [modal, setModal] = useState<
+    { title: string; initial: string; placeholder?: string; onOk: (name: string) => void } | null
+  >(null);
+  // 拖动中的文件夹 id：dragover 阶段读不到负载数据，只能靠它把「自己/自己的后代」排除出可落目标
+  const [draggingFolderId, setDraggingFolderId] = useState<string | null>(null);
+  const [rootHover, setRootHover] = useState<"all" | "uncat" | null>(null);
   const byParent = groupByParent(db.folders);
 
   // 标签计数限定在当前文件夹范围内，点选后数量对得上
@@ -53,15 +60,50 @@ export function Sidebar({
   const askRename = (f: Folder) =>
     setModal({ title: "重命名文件夹", initial: f.name, onOk: name => void renameFolder(f.id, name) });
 
+  // 预建标签：不挂在错题上也保留，方便提前规划标签体系；已存在（错题已带/已预建）时静默跳过
+  const askNewTag = () =>
+    setModal({ title: "新建标签", initial: "", placeholder: "标签名称", onOk: name => void createTag(name) });
+
   const askDelete = async (f: Folder) => {
     const ok = await ask(
-      `删除文件夹「${f.name}」？\n其中的错题会移到「未分类」，子文件夹会上移一级。`,
+      `删除文件夹「${f.name}」？\n其中的错题只是移出该文件夹（其他所属文件夹保留，全部移空的进「未分类」），子文件夹上移一级。`,
       { title: "删除文件夹" },
     );
     if (!ok) return;
     await deleteFolder(f.id);
     if (selected === f.id) onSelect("");
   };
+
+  // ---------- 拖放：错题 ↔ 文件夹归类、文件夹 ↔ 重挂父级 ----------
+
+  /** 错题落到文件夹上：默认移动（替换所属）；按住 ⌥/Ctrl 落下 = 追加所属（多文件夹） */
+  const dropMistakeOn = (e: DragEvent, folderId: string | null) => {
+    const id = e.dataTransfer.getData(DND_MISTAKE);
+    if (!id) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    if (folderId === null) {
+      void setMistakeFolders(id, []); // 「未分类」= 清空所属
+    } else if (e.altKey || e.ctrlKey || e.metaKey) {
+      const ids = getMistake(id)?.folderIds ?? [];
+      if (!ids.includes(folderId)) void setMistakeFolders(id, [...ids, folderId]);
+    } else {
+      void setMistakeFolders(id, [folderId]);
+    }
+    return true;
+  };
+
+  /** 文件夹落到目标上重挂父级（parentId 为 null = 移到顶层，即落在「全部错题」上） */
+  const dropFolderOn = (e: DragEvent, parentId: string | null) => {
+    const fid = e.dataTransfer.getData(DND_FOLDER);
+    if (!fid) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    void moveFolder(fid, parentId);
+    return true;
+  };
+
+  const hasPayload = (e: DragEvent, ...types: string[]) => types.some(t => e.dataTransfer.types.includes(t));
 
   return (
     <aside className="sidebar">
@@ -70,11 +112,41 @@ export function Sidebar({
           <span>文件夹</span>
           <button onClick={() => askNewFolder(null)}>＋ 新建</button>
         </div>
-        <button className={`side-item ${selected === "" ? "active" : ""}`} onClick={() => onSelect("")}>
+        <button
+          className={`side-item ${selected === "" ? "active" : ""} ${rootHover === "all" ? "drop-target" : ""}`}
+          title="拖文件夹到此处 = 移到顶层"
+          onClick={() => onSelect("")}
+          onDragOver={e => {
+            if (hasPayload(e, DND_FOLDER)) {
+              e.preventDefault();
+              setRootHover("all");
+            }
+          }}
+          onDragLeave={() => setRootHover(h => (h === "all" ? null : h))}
+          onDrop={e => {
+            setRootHover(null);
+            dropFolderOn(e, null);
+          }}
+        >
           <span className="folder-name">全部错题</span>
           <span className="count">{mistakesMatchingTags.length}</span>
         </button>
-        <button className={`side-item ${selected === "uncat" ? "active" : ""}`} onClick={() => onSelect("uncat")}>
+        <button
+          className={`side-item ${selected === "uncat" ? "active" : ""} ${rootHover === "uncat" ? "drop-target" : ""}`}
+          title="拖错题到此处 = 移出所有文件夹（未分类）"
+          onClick={() => onSelect("uncat")}
+          onDragOver={e => {
+            if (hasPayload(e, DND_MISTAKE)) {
+              e.preventDefault();
+              setRootHover("uncat");
+            }
+          }}
+          onDragLeave={() => setRootHover(h => (h === "uncat" ? null : h))}
+          onDrop={e => {
+            setRootHover(null);
+            dropMistakeOn(e, null);
+          }}
+        >
           <span className="folder-name">未分类</span>
           <span className="count">{countUncategorized(mistakesMatchingTags, db.folders)}</span>
         </button>
@@ -92,6 +164,10 @@ export function Sidebar({
               mistakes={mistakesMatchingTags}
               folders={db.folders}
               byParent={byParent}
+              draggingFolderId={draggingFolderId}
+              setDraggingFolderId={setDraggingFolderId}
+              dropMistakeOn={dropMistakeOn}
+              dropFolderOn={dropFolderOn}
             />
           ))}
         </div>
@@ -101,6 +177,9 @@ export function Sidebar({
         <div className="side-head">
           <span>标签{activeTags.length > 0 ? `（${activeTags.length}）` : ""}</span>
           <span className="side-head-acts">
+            <button title="新建标签（可先建好再给错题打）" onClick={askNewTag}>
+              ＋ 新建
+            </button>
             {activeTags.length >= 2 && (
               <button
                 title="切换多标签匹配方式：交集（同时满足）/ 并集（任一满足）"
@@ -112,7 +191,7 @@ export function Sidebar({
             {activeTags.length > 0 && <button onClick={onClearTags}>清除</button>}
           </span>
         </div>
-        {allTags.length === 0 && <div className="muted side-pad">还没有标签，在录入页给错题打标签</div>}
+        {allTags.length === 0 && <div className="muted side-pad">还没有标签，点「＋ 新建」预建，或在录入页给错题打标签</div>}
         {allTags.map(t => {
           const n = tagCountsInView.get(t) ?? 0;
           return (
@@ -143,6 +222,7 @@ export function Sidebar({
         <NameModal
           title={modal.title}
           initial={modal.initial}
+          placeholder={modal.placeholder}
           onOk={name => {
             modal.onOk(name);
             setModal(null);
@@ -165,6 +245,10 @@ interface NodeProps {
   mistakes: Mistake[];
   folders: Folder[];
   byParent: Map<string | null, Folder[]>;
+  draggingFolderId: string | null;
+  setDraggingFolderId: (id: string | null) => void;
+  dropMistakeOn: (e: DragEvent, folderId: string | null) => boolean;
+  dropFolderOn: (e: DragEvent, parentId: string | null) => boolean;
 }
 
 function FolderNode({
@@ -178,16 +262,51 @@ function FolderNode({
   mistakes,
   folders,
   byParent,
+  draggingFolderId,
+  setDraggingFolderId,
+  dropMistakeOn,
+  dropFolderOn,
 }: NodeProps) {
   const [open, setOpen] = useState(true);
+  const [hover, setHover] = useState(false);
   const children = byParent.get(folder.id) ?? [];
+
+  // 文件夹拖动落点合法性：不能是自己或自己的后代（防环）
+  const folderDropOk =
+    !!draggingFolderId && draggingFolderId !== folder.id && !descendantSet(folders, draggingFolderId).has(folder.id);
+
+  const dragOver = (e: DragEvent) => {
+    const ok =
+      e.dataTransfer.types.includes(DND_MISTAKE) ||
+      (e.dataTransfer.types.includes(DND_FOLDER) && folderDropOk);
+    if (!ok) return;
+    e.preventDefault(); // 允许落下
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    setHover(true);
+  };
 
   return (
     <div>
       <div
-        className={`side-item folder-row ${selected === folder.id ? "active" : ""}`}
+        className={`side-item folder-row ${selected === folder.id ? "active" : ""} ${hover ? "drop-target" : ""}`}
         style={{ paddingLeft: 8 + depth * 14 }}
+        title="拖错题到此归类（按住 ⌥ 追加所属）；拖到别的文件夹上调整层级"
         onClick={() => onSelect(folder.id)}
+        draggable
+        onDragStart={e => {
+          e.dataTransfer.setData(DND_FOLDER, folder.id);
+          e.dataTransfer.effectAllowed = "move";
+          setDraggingFolderId(folder.id);
+        }}
+        onDragEnd={() => setDraggingFolderId(null)}
+        onDragOver={dragOver}
+        onDragLeave={() => setHover(false)}
+        onDrop={e => {
+          setHover(false);
+          if (!dropMistakeOn(e, folder.id)) dropFolderOn(e, folder.id);
+          setDraggingFolderId(null);
+        }}
       >
         <button
           className="fold-toggle"
@@ -228,6 +347,10 @@ function FolderNode({
             mistakes={mistakes}
             folders={folders}
             byParent={byParent}
+            draggingFolderId={draggingFolderId}
+            setDraggingFolderId={setDraggingFolderId}
+            dropMistakeOn={dropMistakeOn}
+            dropFolderOn={dropFolderOn}
           />
         ))}
     </div>

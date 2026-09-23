@@ -3,11 +3,13 @@ import { useEffect, useRef, useState } from "react";
 export function NameModal({
   title,
   initial,
+  placeholder = "文件夹名称",
   onOk,
   onCancel,
 }: {
   title: string;
   initial: string;
+  placeholder?: string;
   onOk: (name: string) => void;
   onCancel: () => void;
 }) {
@@ -32,7 +34,7 @@ export function NameModal({
           ref={inputRef}
           className="modal-input"
           value={value}
-          placeholder="文件夹名称"
+          placeholder={placeholder}
           onChange={e => setValue(e.target.value)}
           onKeyDown={e => {
             if (e.key === "Enter") {

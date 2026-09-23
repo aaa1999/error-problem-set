@@ -1,13 +1,17 @@
 import { join } from "@tauri-apps/api/path";
-import { exists, readFile } from "@tauri-apps/plugin-fs";
+import { exists, readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { fetch } from "@tauri-apps/plugin-http";
 import type { Database } from "../types";
+import { normalizeDb } from "./db";
+import { executeMerge, planMerge, type MergeIO, type MergeOutcome, type MergePlan } from "./merge";
 import { collectAssetRefs } from "./markdown";
 
 /**
- * 远程同步（推送）：把整库推到自建服务端，协议见 docs/sync-protocol.md。
- * 流程：GET /sync/manifest 拿服务端已有图片清单 → 只 PUT 缺的图片 → PUT /sync/data 推整份库。
- * 图片文件名即内容哈希，天然幂等：重跑时已上传的会出现在清单里被跳过。
+ * 远程同步（推送 + 拉取），协议见 docs/sync-protocol.md（v2）。
+ * 推送：GET /sync/manifest 拿服务端已有图片清单 → 只 PUT 缺的图片 → PUT /sync/data 推整份库。
+ * 拉取：GET /sync/data 拿远端整库 → 与本地做幂等合并（错题/笔记按 id、文件夹按名称+父级、
+ *       图片按内容哈希只下缺的、预建标签并入），与「合并导入」同一套核心逻辑（lib/merge.ts）。
+ * 图片文件名即内容哈希，天然幂等：重跑时已传/已下的自动跳过。
  */
 
 const TARGET_KEY = "errorbook.sync.server";
@@ -176,5 +180,92 @@ export async function pushToServer(
     mistakes: db.mistakes.length,
     notes: db.notes.length,
     folders: db.folders.length,
+  };
+}
+
+// ---------- 拉取（v2 协议） ----------
+
+export interface PullProgress {
+  phase: "connect" | "assets" | "merge";
+  done: number;
+  total: number;
+  current?: string;
+}
+
+export interface PullOutcome extends MergeOutcome {
+  /** 远端整库的规模（含本地已有的） */
+  remoteMistakes: number;
+  remoteNotes: number;
+  remoteFolders: number;
+  /** 本次实际从服务端下载的图片数 */
+  downloadedAssets: number;
+}
+
+/** 拉取阶段一：取远端整库并算差量（只读，不写任何数据），供确认预览 */
+export async function fetchRemotePlan(target: SyncTarget, current: Database): Promise<MergePlan> {
+  const res = await request(
+    `${target.server}/sync/data`,
+    { method: "GET", headers: authHeaders(target), connectTimeout: 5000 },
+    "拉取题库数据",
+  );
+  if (res.status === 401 || res.status === 403) throw denyError(res.status);
+  if (res.status === 404) throw new Error("服务器上还没有数据：请先从任意一端推送，或该服务端版本过旧（未实现拉取端点）");
+  if (!res.ok) throw new Error(`拉取题库数据失败：HTTP ${res.status}`);
+  const raw = await res.json().catch(() => null);
+  if (!raw || typeof raw !== "object") throw new Error("服务端返回的不是合法的题库数据");
+  const remote = normalizeDb(raw);
+  if (remote.mistakes.length === 0 && remote.notes.length === 0) {
+    throw new Error("服务器上的库是空的（无错题无笔记），没有可拉取的内容");
+  }
+  return planMerge(current, remote);
+}
+
+/** 拉取阶段二：下载缺失图片 + 幂等并入本地库 */
+export async function pullFromServer(
+  target: SyncTarget,
+  dataDir: string,
+  plan: MergePlan,
+  store: Pick<MergeIO, "findOrCreateFolder" | "addMistakes" | "addNotes" | "addTags" | "addPendingImports">,
+  onProgress: (p: PullProgress) => void,
+  isAborted: () => boolean,
+): Promise<PullOutcome> {
+  let downloaded = 0;
+  let assetDone = 0;
+  const total = plan.newMistakes.length + plan.newNotes.length + plan.assetKeys.length;
+  const outcome = await executeMerge(plan, {
+    ...store,
+    fetchAsset: async key => {
+      const dstPath = await join(dataDir, "assets", key);
+      if (await exists(dstPath)) {
+        assetDone++;
+        return true; // 本地已有（内容哈希一致）
+      }
+      onProgress({ phase: "assets", done: assetDone, total, current: key });
+      const res = await request(
+        `${target.server}/sync/asset/${key}`,
+        { method: "GET", headers: { ...authHeaders(target) }, connectTimeout: 5000 },
+        `下载 ${key}`,
+      );
+      if (res.status === 404) {
+        assetDone++;
+        return false; // 服务端也缺这张图：保留引用跳过（与推送/合并口径一致）
+      }
+      if (res.status === 401 || res.status === 403) throw denyError(res.status);
+      if (!res.ok) throw new Error(`下载图片 ${key} 失败：HTTP ${res.status}`);
+      await writeFile(dstPath, new Uint8Array(await res.arrayBuffer()));
+      downloaded++;
+      assetDone++;
+      return true;
+    },
+    onProgress: (done, t) => onProgress({ phase: "assets", done, total: t }),
+    isAborted,
+  });
+  onProgress({ phase: "merge", done: 1, total: 1 });
+  return {
+    ...outcome,
+    remoteMistakes: plan.source.mistakes.length,
+    remoteNotes: plan.source.notes.length,
+    remoteFolders: plan.source.folders.length,
+    downloadedAssets: downloaded,
   };
 }

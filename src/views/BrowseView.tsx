@@ -1,13 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
-import type { ImageBlock } from "../types";
+import type { ImageBlock, Mistake } from "../types";
 import { descendantSet, folderPathName } from "../lib/folders";
-import { isBlocksEmpty } from "../lib/utils";
+import { DND_MISTAKE } from "../lib/dnd";
+import { copyMistake } from "../lib/copy";
+import { isBlocksEmpty, newShuffleSeed, seededShuffle } from "../lib/utils";
 import { useBook } from "../store";
 import { BlockView } from "../components/BlockView";
 import { Lightbox } from "../components/Lightbox";
 import { Sidebar } from "../components/Sidebar";
 import { FolderSelect } from "../components/FolderSelect";
+
+/** 翻页排列：按录入时间（旧→新）/ 按错误率（高→低，仅带选项的题）/ 随机（稳定洗牌，重算不跳序） */
+type BrowseOrder = "time" | "error" | "random";
+const ORDER_KEY = "errorbook.browse.order";
+
+function loadOrder(): BrowseOrder {
+  const v = localStorage.getItem(ORDER_KEY);
+  return v === "random" || v === "error" ? v : "time";
+}
+
+/** 错误率百分比（未作答按 0% 计） */
+function optionRate(m: Mistake): number {
+  return m.attempts > 0 ? Math.round((m.wrong / m.attempts) * 100) : 0;
+}
 
 export function BrowseView({
   onEdit,
@@ -20,7 +36,7 @@ export function BrowseView({
   selected: string;
   onSelect: (s: string) => void;
 }) {
-  const { db, allTags, assetSrc, deleteMistake, setMistakeFolder, updateMistake } = useBook();
+  const { db, allTags, assetSrc, assetsDir, deleteMistake, setMistakeFolders, updateMistake } = useBook();
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [tagMode, setTagMode] = useState<"and" | "or">("and");
   const [index, setIndex] = useState(0);
@@ -28,9 +44,11 @@ export function BrowseView({
   const [revealed, setRevealed] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
-  const [moveTarget, setMoveTarget] = useState<string | null>(null);
+  const [moveTarget, setMoveTarget] = useState<string[]>([]);
   const [tagPopOpen, setTagPopOpen] = useState(false);
   const [tagDraft, setTagDraft] = useState("");
+  const [order, setOrder] = useState<BrowseOrder>(loadOrder);
+  const [seed, setSeed] = useState(newShuffleSeed);
   const touch = useRef<{ x: number; y: number } | null>(null);
 
   // 文件夹范围（含子文件夹）；标签筛选叠加其上，两者同时生效
@@ -38,10 +56,10 @@ export function BrowseView({
     let arr = db.mistakes;
     if (selected === "uncat") {
       const ids = new Set(db.folders.map(f => f.id));
-      arr = arr.filter(m => !m.folderId || !ids.has(m.folderId));
+      arr = arr.filter(m => !m.folderIds.some(id => ids.has(id)));
     } else if (selected) {
       const set = descendantSet(db.folders, selected);
-      arr = arr.filter(m => m.folderId !== null && set.has(m.folderId));
+      arr = arr.filter(m => m.folderIds.some(id => set.has(id)));
     }
     return arr;
   }, [db, selected]);
@@ -54,11 +72,22 @@ export function BrowseView({
   }, [db, activeTags, tagMode]);
 
   const list = useMemo(() => {
-    if (activeTags.length === 0) return inFolder;
-    return tagMode === "and"
-      ? inFolder.filter(m => activeTags.every(t => m.tags.includes(t)))
-      : inFolder.filter(m => activeTags.some(t => m.tags.includes(t)));
-  }, [inFolder, activeTags, tagMode]);
+    let arr = inFolder;
+    if (activeTags.length > 0) {
+      arr = tagMode === "and"
+        ? inFolder.filter(m => activeTags.every(t => m.tags.includes(t)))
+        : inFolder.filter(m => activeTags.some(t => m.tags.includes(t)));
+    }
+    if (order === "time") return [...arr].sort((a, b) => a.createdAt - b.createdAt);
+    if (order === "error") {
+      // 错误率排序：只含有选项且标记了正确答案的题（其余不参与）；错误率高 → 作答多 → 先录入在前
+      return arr
+        .filter(m => m.options.length > 0 && m.answer !== null)
+        .sort((a, b) => optionRate(b) - optionRate(a) || b.attempts - a.attempts || a.createdAt - b.createdAt);
+    }
+    // 随机：seed 固定的稳定洗牌（换 seed 才换序）
+    return seededShuffle(arr, seed);
+  }, [inFolder, activeTags, tagMode, order, seed]);
 
   const cur = list.length > 0 ? list[Math.min(index, list.length - 1)] : undefined;
 
@@ -87,12 +116,51 @@ export function BrowseView({
     onSelect("");
   };
 
-  // 筛选变化回到第一题；删除/筛选导致列表变短时收敛下标
+  // 选择题作答：本次浏览内每题只作答一次，答完自动翻开解析并累计统计（落盘）
+  const [picked, setPicked] = useState<number | null>(null);
+  const answerOption = (i: number) => {
+    if (!cur || picked !== null || cur.answer === null) return;
+    setPicked(i);
+    setRevealed(true);
+    const ok = i === cur.answer;
+    void updateMistake({
+      ...cur,
+      attempts: cur.attempts + 1,
+      wrong: cur.wrong + (ok ? 0 : 1),
+      updatedAt: Date.now(),
+    });
+  };
+
+  // 一键复制：只复制题目 / 复制全部内容（富文本优先，图片内嵌；失败退纯文本）
+  const [copied, setCopied] = useState<"" | "rich" | "text">("");
+  const [copiedScope, setCopiedScope] = useState<"question" | "all">("all");
+  const [copyPopOpen, setCopyPopOpen] = useState(false);
+  const copyCur = async (scope: "question" | "all") => {
+    if (!cur) return;
+    setCopyPopOpen(false);
+    const r = await copyMistake(cur, db.folders, assetsDir, scope);
+    setCopiedScope(scope);
+    setCopied(r);
+    window.setTimeout(() => setCopied(""), 1800);
+  };
+
+  // 切排列：进入随机模式换一批新顺序；随机模式下点「随机」= 重新洗牌
+  const applyOrder = (o: BrowseOrder) => {
+    if (o === order) return;
+    localStorage.setItem(ORDER_KEY, o);
+    setOrder(o);
+    if (o === "random") setSeed(newShuffleSeed());
+  };
+  const reshuffle = () => setSeed(newShuffleSeed());
+
+  // 筛选或排列变化回到第一题；删除/筛选导致列表变短时收敛下标
   useEffect(() => {
     setIndex(0);
     setRevealed(false);
     setTagPopOpen(false);
-  }, [selected, activeTags, tagMode]);
+    setCopyPopOpen(false);
+    setPicked(null);
+  }, [selected, activeTags, tagMode, order, seed]);
 
   useEffect(() => {
     setIndex(i => Math.min(i, Math.max(list.length - 1, 0)));
@@ -106,6 +174,8 @@ export function BrowseView({
     setIndex(n);
     setRevealed(false);
     setTagPopOpen(false);
+    setCopyPopOpen(false);
+    setPicked(null);
   };
 
   useEffect(() => {
@@ -148,12 +218,12 @@ export function BrowseView({
 
   const openMove = () => {
     if (!cur) return;
-    setMoveTarget(cur.folderId ?? null);
+    setMoveTarget([...cur.folderIds]);
     setMoveOpen(true);
   };
 
   const confirmMove = async () => {
-    if (cur) await setMistakeFolder(cur.id, moveTarget);
+    if (cur) await setMistakeFolders(cur.id, moveTarget);
     setMoveOpen(false);
   };
 
@@ -171,6 +241,33 @@ export function BrowseView({
       mistakesInFolder={inFolder}
       mistakesMatchingTags={mistakesMatchingTags}
     />
+  );
+
+  // 排列方式切换：正常浏览在底栏，空态（如错误率排序下当前文件夹没有选择题）也渲染，避免被困住
+  const orderSwitch = (
+    <span className="order-switch" role="group" aria-label="排列方式">
+      <button
+        className={`seg ${order === "time" ? "on" : ""}`}
+        title="按录入时间排列（旧 → 新）"
+        onClick={() => applyOrder("time")}
+      >
+        ⏱ 时间
+      </button>
+      <button
+        className={`seg ${order === "error" ? "on" : ""}`}
+        title="按错误率从高到低（只显示录入时填了选项的题，优先复习错得多的）"
+        onClick={() => applyOrder("error")}
+      >
+        📊 错误率
+      </button>
+      <button
+        className={`seg ${order === "random" ? "on" : ""}`}
+        title={order === "random" ? "点击重新洗牌（换一批顺序）" : "随机排列，适合复习防背序"}
+        onClick={() => (order === "random" ? reshuffle() : applyOrder("random"))}
+      >
+        🔀 随机
+      </button>
+    </span>
   );
 
   if (list.length === 0 || !cur) {
@@ -195,7 +292,9 @@ export function BrowseView({
                   {crumb}
                   {activeTags.length > 0 &&
                     ` · ${tagMode === "and" ? "同时含" : "含任一"}标签：${activeTags.join(tagMode === "and" ? " + " : " / ")}`}
+                  {order === "error" && " · 错误率排序只显示录入时填了选项并标记了正确答案的题"}
                 </p>
+                {orderSwitch}
                 <button className="btn" onClick={clearFilters}>
                   清除筛选
                 </button>
@@ -217,6 +316,12 @@ export function BrowseView({
           <div
             key={index}
             className={`browse ${dir === 1 ? "anim-next" : "anim-prev"}`}
+            title="按住卡片可拖到左侧文件夹归类（按住 ⌥ 拖 = 追加所属，不清掉原有文件夹）"
+            draggable={!tagPopOpen}
+            onDragStart={e => {
+              e.dataTransfer.setData(DND_MISTAKE, cur.id);
+              e.dataTransfer.effectAllowed = "move";
+            }}
             onTouchStart={e => {
               touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
             }}
@@ -233,14 +338,36 @@ export function BrowseView({
                 ←
               </button>
               <div className="crumb-wrap">
-                <span className="crumb" title={crumb}>
-                  {crumb}
-                </span>
+                {selected === "" ? (
+                  <span className="crumb" title={crumb}>
+                    {crumb}
+                  </span>
+                ) : (
+                  <button
+                    className="tag-chip chip-btn"
+                    title="点击取消文件夹筛选（回到全部错题）"
+                    onClick={() => onSelect("")}
+                  >
+                    📁 {crumb} ✕
+                  </button>
+                )}
                 {activeTags.map(t => (
                   <button key={t} className="tag-chip chip-btn" title="点击移除该标签筛选" onClick={() => toggleTag(t)}>
                     {t} ✕
                   </button>
                 ))}
+                {(selected !== "" || activeTags.length > 0) && (
+                  <button
+                    className="tag-chip chip-btn reset-chip"
+                    title="重置全部筛选条件（文件夹 + 标签）"
+                    onClick={() => {
+                      setActiveTags([]);
+                      onSelect("");
+                    }}
+                  >
+                    ⟲ 重置
+                  </button>
+                )}
               </div>
               <div className="browse-progress">
                 第 {index + 1} / {list.length} 题
@@ -296,6 +423,7 @@ export function BrowseView({
                             addNewTagToCur();
                           } else if (e.key === "Escape") {
                             setTagPopOpen(false);
+    setCopyPopOpen(false);
                           }
                         }}
                       />
@@ -305,6 +433,50 @@ export function BrowseView({
               </div>
               <div className="page-label">题目</div>
               <BlockView blocks={cur.question} onImageClick={openImage} />
+
+              {cur.options.length > 0 && cur.answer !== null && (
+                <div className="opt-block">
+                  <div className="opt-head">
+                    <span>作答</span>
+                    <span
+                      className={`opt-rate ${cur.attempts === 0 ? "" : optionRate(cur) >= 50 ? "bad" : "good"}`}
+                      title={`答错 ${cur.wrong} 次 / 共作答 ${cur.attempts} 次`}
+                    >
+                      错误率 {optionRate(cur)}%（{cur.wrong}/{cur.attempts}）
+                    </span>
+                  </div>
+                  <div className="opt-list">
+                    {cur.options.map((o, i) => {
+                      const answered = picked !== null;
+                      const isCorrect = i === cur.answer;
+                      const isWrongPick = answered && i === picked && !isCorrect;
+                      const cls = answered && isCorrect ? "correct" : isWrongPick ? "wrong-pick" : "";
+                      return (
+                        <button
+                          type="button"
+                          key={i}
+                          className={`opt-item ${cls}`}
+                          disabled={answered}
+                          onClick={() => answerOption(i)}
+                        >
+                          <span className="opt-letter">{String.fromCharCode(65 + i)}</span>
+                          <span>{o}</span>
+                          {answered && isCorrect && (
+                            <span className="opt-mark" style={{ color: "#2e7d32" }}>
+                              ✓ 正确答案{picked === i ? "（你选对了）" : ""}
+                            </span>
+                          )}
+                          {isWrongPick && (
+                            <span className="opt-mark" style={{ color: "#c62828" }}>
+                              ✕ 你的选择
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className={`page-a ${revealed ? "" : "masked"}`}>
                 <div className="page-label">解析</div>
@@ -329,10 +501,38 @@ export function BrowseView({
             </div>
 
             <div className="browse-foot">
+              {orderSwitch}
               <span className="muted">
-                <kbd>←</kbd> <kbd>→</kbd> 翻页 · <kbd>空格</kbd> 看解析 · <kbd>E</kbd> 编辑 · <kbd>N</kbd> 新增
+                {copied
+                  ? copied === "rich"
+                    ? copiedScope === "question"
+                      ? "已复制题目 ✓（含图片，可直接粘贴）"
+                      : "已复制全部内容 ✓（含图片，可直接粘贴到 Word / 笔记）"
+                    : "已复制 ✓（纯文本，此环境不支持带图复制）"
+                  : <>
+                      <kbd>←</kbd> <kbd>→</kbd> 翻页 · <kbd>空格</kbd> 看解析 · <kbd>E</kbd> 编辑 · <kbd>N</kbd> 新增 ·
+                      拖题到侧栏文件夹归类（⌥ 追加所属）
+                    </>}
               </span>
               <div className="row-actions">
+                <div className="copy-menu">
+                  <button className="btn btn-sm" title="只复制题目，或复制整道题的全部内容" onClick={() => setCopyPopOpen(o => !o)}>
+                    复制 ▾
+                  </button>
+                  {copyPopOpen && (
+                    <>
+                      <div className="popover-backdrop" onClick={() => setCopyPopOpen(false)} />
+                      <div className="copy-pop">
+                        <button type="button" onClick={() => void copyCur("question")}>
+                          只复制题目（含图片）
+                        </button>
+                        <button type="button" onClick={() => void copyCur("all")}>
+                          复制全部内容（题目、选项、解析、标签、文件夹）
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
                 <button className="btn btn-sm" onClick={() => onEdit(cur.id)}>
                   编辑
                 </button>
@@ -351,15 +551,15 @@ export function BrowseView({
       {moveOpen && (
         <div className="modal-mask" onMouseDown={() => setMoveOpen(false)}>
           <div className="modal-card" onMouseDown={e => e.stopPropagation()}>
-            <h3>移动到文件夹</h3>
+            <h3>调整所属文件夹</h3>
             <FolderSelect value={moveTarget} onChange={setMoveTarget} />
-            <p className="muted">选「未分类」即移出所有文件夹；也可以之后在编辑页修改。</p>
+            <p className="muted">一道题可同时属于多个文件夹；全部取消勾选即回到「未分类」。</p>
             <div className="modal-foot">
               <button className="btn" onClick={() => setMoveOpen(false)}>
                 取消
               </button>
               <button className="btn btn-primary" onClick={() => void confirmMove()}>
-                移动
+                保存
               </button>
             </div>
           </div>

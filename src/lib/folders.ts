@@ -54,14 +54,14 @@ export function descendantSet(folders: Folder[], id: string): Set<string> {
   return set;
 }
 
-/** 该文件夹（含子文件夹）里的错题数 */
+/** 该文件夹（含子文件夹）里的错题数；一道题属于多个文件夹时在每个文件夹都计数 */
 export function countInFolder(mistakes: Mistake[], folders: Folder[], id: string): number {
   const set = descendantSet(folders, id);
-  return mistakes.reduce((n, m) => (m.folderId && set.has(m.folderId) ? n + 1 : n), 0);
+  return mistakes.reduce((n, m) => (m.folderIds.some(fid => set.has(fid)) ? n + 1 : n), 0);
 }
 
-/** 未分类 = 没有文件夹 id，或指向已不存在的文件夹 */
+/** 未分类 = 没有任何文件夹 id，或所有 id 都指向已不存在的文件夹 */
 export function countUncategorized(mistakes: Mistake[], folders: Folder[]): number {
   const ids = new Set(folders.map(f => f.id));
-  return mistakes.reduce((n, m) => (!m.folderId || !ids.has(m.folderId) ? n + 1 : n), 0);
+  return mistakes.reduce((n, m) => (!m.folderIds.some(fid => ids.has(fid)) ? n + 1 : n), 0);
 }

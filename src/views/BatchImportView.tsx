@@ -8,7 +8,7 @@ import { folderPathName } from "../lib/folders";
 import { naturalCompare, uuid } from "../lib/utils";
 import { useBook } from "../store";
 import { TagInput } from "../components/TagInput";
-import { FolderSelect } from "../components/FolderSelect";
+import { FolderSingleSelect } from "../components/FolderSelect";
 import { MergeImport } from "../components/MergeImport";
 
 type RowMode = "q" | "a" | "skip";
@@ -185,7 +185,11 @@ export function BatchImportView({
               const folderId = await resolveFolder(row.relDir);
               const m: Mistake = {
                 id: uuid(),
-                folderId,
+                folderIds: folderId ? [folderId] : [],
+                options: [], // 批量导入的是截图题，没有选项；可在编辑页补填
+                answer: null,
+                attempts: 0,
+                wrong: 0,
                 question: [img],
                 analysis: [],
                 tags: [...tags],
@@ -264,7 +268,7 @@ export function BatchImportView({
                       {g.relDir !== "" && "（不存在会自动创建）"}
                     </span>
                   ) : (
-                    <FolderSelect
+                    <FolderSingleSelect
                       value={groupTargets[g.relDir] ?? rootFolderId}
                       onChange={v => setGroupTargets(t => ({ ...t, [g.relDir]: v }))}
                     />
@@ -299,7 +303,7 @@ export function BatchImportView({
         <div className="page-card" style={{ marginTop: 16 }}>
           <div className="page-label">③ 目标位置、标签并导入</div>
           <div className="entry-meta">
-            <FolderSelect value={rootFolderId} onChange={setRootFolderId} />
+            <FolderSingleSelect value={rootFolderId} onChange={setRootFolderId} />
             {hasSubDirs && (
               <label className="mirror-check" title="在目标文件夹下按来源的子文件夹层级自动创建同名文件夹，已存在的直接复用">
                 <input
