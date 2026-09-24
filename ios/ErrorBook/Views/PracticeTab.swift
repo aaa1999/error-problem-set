@@ -7,7 +7,8 @@ import SwiftUI
 struct PracticeTab: View {
   @EnvironmentObject private var store: BookStore
 
-  @State private var folderName = ""
+  /// 做题文件夹：@AppStorage 跨启动记住上次用的
+  @AppStorage("practiceFolderName") private var folderName = ""
   @State private var countText = "100"
   // 会话保存在 tab 里：中途退出全屏页也能继续
   @State private var sheet: PracticeSheet?
@@ -260,7 +261,7 @@ struct PracticePhaseView: View {
   @State private var keyBulk = ""
   @State private var keyBulkMsg = ""
 
-  /// 批量导入正确答案：每行「题号<Tab>答案」（分隔符兼容 Tab/空格/逗号），如「1	A」
+  /// 批量导入正确答案：每行「题号 分隔符 答案」（分隔符兼容若干空格/Tab/全角空格/逗号/顿号/句点/冒号；答案不分大小写，全角 ａ/Ａ/１ 先转半角），如「1  A」
   private func importKeyBulk() {
     var s = sheet
     var applied = 0
@@ -289,18 +290,25 @@ struct PracticePhaseView: View {
   /// 从「12	A」这样的行里取题号与大写字母
   private func firstIntAndLetter(_ line: String) -> (n: Int, o: String)? {
     var nText = ""
-    var rest = Substring(line)
+    var rest = Substring(halfWidth(line))
     while let f = rest.first, f.isNumber {
       nText.append(f)
       rest = rest.dropFirst()
     }
     guard let n = Int(nText), n > 0 else { return nil }
-    // 跳过分隔符（Tab/空格/中英文逗号/冒号）
-    while let f = rest.first, f == "\t" || f == " " || f == "," || f == "，" || f == ":" {
+    // 跳过分隔符（任意空白（含全角空格）/中英文逗号/顿号/句点/中英文冒号）
+    while let f = rest.first, f.isWhitespace || f == "," || f == "，" || f == "、" || f == "." || f == ":" || f == "：" {
       rest = rest.dropFirst()
     }
     guard let o = rest.first, "ABCDabcd".contains(o) else { return nil }
     return (n, String(o).uppercased())
+  }
+
+  /// 全角字母/数字（！–～）转半角：中文输入法打出的 ａ/Ａ/１ 也能解析
+  private func halfWidth(_ line: String) -> String {
+    String(String.UnicodeScalarView(line.unicodeScalars.map {
+      (0xFF01...0xFF5E).contains($0.value) ? UnicodeScalar($0.value - 0xFEE0)! : $0
+    }))
   }
 
   private var keyList: some View {
@@ -317,13 +325,13 @@ struct PracticePhaseView: View {
         Text("逐题输入正确答案；已对 \(sheet.key.compactMap { $0 }.count) / \(sheet.count) 题，没对的按「未比对」处理")
           .font(.footnote).foregroundStyle(.secondary)
       }
-      Section("批量导入正确答案（每行：题号 + Tab + 答案）") {
+      Section("批量导入正确答案（每行：题号 + 空格或 Tab + 答案，不分大小写）") {
         TextEditor(text: $keyBulk)
           .font(.body.monospaced())
           .frame(minHeight: 88)
           .overlay(alignment: .topLeading) {
             if keyBulk.isEmpty {
-              Text("1\tA\n2\tC\n3\tB").font(.body.monospaced()).foregroundStyle(.tertiary)
+              Text("1 A\n2 C\n3 B").font(.body.monospaced()).foregroundStyle(.tertiary)
                 .padding(.top, 8).padding(.leading, 4).allowsHitTesting(false)
             }
           }

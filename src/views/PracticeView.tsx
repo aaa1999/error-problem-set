@@ -28,6 +28,9 @@ export interface PracticeSession {
   importSel: boolean[];
 }
 
+/** 做题文件夹跨启动记住：开始新的一组时写入，设置页带出 */
+const FOLDER_KEY = "errorbook.practice.folder";
+
 export function PracticeView({
   session,
   setSession,
@@ -38,12 +41,13 @@ export function PracticeView({
   const { db, addMistake, findOrCreateFolder, removePendingImport } = useBook();
 
   // ---------- 设置 ----------
-  const [folderName, setFolderName] = useState(session?.folderName ?? "");
+  const [folderName, setFolderName] = useState(session?.folderName ?? localStorage.getItem(FOLDER_KEY) ?? "");
   const [count, setCount] = useState(session?.count ?? 100);
 
   const start = () => {
     const n = Math.min(100, Math.max(1, Math.floor(count) || 1));
     setCount(n);
+    localStorage.setItem(FOLDER_KEY, folderName.trim());
     setSession({
       phase: "answer",
       folderName: folderName.trim(),
@@ -65,7 +69,7 @@ export function PracticeView({
   const toggleFlag = (i: number) =>
     setSession(session ? { ...session, flagged: session.flagged.map((x, j) => (j === i ? !x : x)) } : session);
 
-  // 批量导入正确答案：每行「题号<Tab>答案」（分隔符兼容 Tab/空格/逗号），如「1	A」
+  // 批量导入正确答案：每行「题号 分隔符 答案」（分隔符兼容若干空格/Tab/全角空格/逗号/顿号/句点/冒号；答案不分大小写，全角 ａ/Ａ/１ 先转半角），如「1  A」
   const [keyBulk, setKeyBulk] = useState("");
   const [keyBulkMsg, setKeyBulkMsg] = useState("");
   const importKeyBulk = () => {
@@ -74,9 +78,10 @@ export function PracticeView({
     let bad = 0;
     const next = [...session.key];
     for (const raw of keyBulk.split(/\r?\n/)) {
-      const line = raw.trim();
+      // 全角字母/数字（！-～）转半角：中文输入法打出的 ａ/Ａ/１ 也能解析
+      const line = raw.trim().replace(/[\uFF01-\uFF5E]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
       if (!line) continue;
-      const m = line.match(/^(\d{1,3})[\s,，]+([A-Da-d])$/);
+      const m = line.match(/^(\d{1,3})[\s,，.、:：]*([A-Da-d])/);
       if (!m) {
         bad++;
         continue;
@@ -375,11 +380,11 @@ export function PracticeView({
             </div>
           </div>
           <div className="prac-bulk">
-            <label className="field-label">批量导入正确答案（每行一条：题号 + Tab + 答案，如「1&nbsp;&nbsp;&nbsp;&nbsp;A」）</label>
+            <label className="field-label">批量导入正确答案（每行一条：题号 + 空格或 Tab + 答案，不分大小写，如「1&nbsp;&nbsp;A」）</label>
             <textarea
               className="modal-input prac-bulk-input"
               value={keyBulk}
-              placeholder={"1\tA\n2\tC\n3\tB"}
+              placeholder={"1 A\n2 C\n3 B"}
               rows={4}
               onChange={e => setKeyBulk(e.target.value)}
             />
