@@ -3,19 +3,41 @@ import type { Block, Mistake } from "../types";
 import { isBlocksEmpty, newTextNode, uuid } from "../lib/utils";
 import { useBook } from "../store";
 import { BlockEditor } from "../components/BlockEditor";
-import { TagInput } from "../components/TagInput";
+import { TagSelect } from "../components/TagInput";
 import { FolderSelect } from "../components/FolderSelect";
+
+/** 录入记忆：勾「记住标签与文件夹」保存后，下次从任何入口录入自动带上（显式预设优先） */
+const MEMORY_KEY = "errorbook.entry.memory";
+type EntryMemory = { folders: string[]; tags: string[] };
+
+function loadEntryMemory(): EntryMemory | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(MEMORY_KEY) ?? "null");
+    if (!v || typeof v !== "object") return null;
+    const folders = Array.isArray(v.folders) ? v.folders.filter((x: unknown): x is string => typeof x === "string") : [];
+    const tags = Array.isArray(v.tags) ? v.tags.filter((x: unknown): x is string => typeof x === "string") : [];
+    return { folders, tags };
+  } catch {
+    return null;
+  }
+}
 
 export function EntryView({
   editId,
   onDone,
   onGoBatch,
   defaultFolderId = null,
+  presetFolders,
+  presetTags,
 }: {
   editId?: string;
   onDone: () => void;
   onGoBatch: () => void;
   defaultFolderId?: string | null;
+  /** 文件夹录入入口带入的预设所属 */
+  presetFolders?: string[];
+  /** 标签录入入口带入的预设标签 */
+  presetTags?: string[];
 }) {
   const { db, allTags, addMistake, updateMistake, getMistake } = useBook();
   const editing = editId ? db.mistakes.find(m => m.id === editId) : undefined;
@@ -23,10 +45,26 @@ export function EntryView({
   const editingRef = useRef(editing);
   editingRef.current = editing;
 
+  const memory = loadEntryMemory();
   const [qBlocks, setQBlocks] = useState<Block[]>(() => (editing ? structuredClone(editing.question) : [newTextNode("")]));
   const [aBlocks, setABlocks] = useState<Block[]>(() => (editing ? structuredClone(editing.analysis) : [newTextNode("")]));
-  const [tags, setTags] = useState<string[]>(() => (editing ? [...editing.tags] : []));
-  const [folderIds, setFolderIds] = useState<string[]>(() => editing ? [...editing.folderIds] : defaultFolderId ? [defaultFolderId] : []);
+  // 初始标签/所属：编辑带出原值；否则显式预设（文件夹/标签录入）> 记住的值 > 浏览中文件夹（仅所属）
+  const [tags, setTags] = useState<string[]>(() =>
+    editing ? [...editing.tags] : presetTags?.length ? [...presetTags] : memory ? [...memory.tags] : [],
+  );
+  const [folderIds, setFolderIds] = useState<string[]>(() =>
+    editing
+      ? [...editing.folderIds]
+      : presetFolders?.length
+        ? [...presetFolders]
+        : memory && memory.folders.length > 0
+          ? [...memory.folders]
+          : defaultFolderId
+            ? [defaultFolderId]
+            : [],
+  );
+  // 记住开关：默认跟随上次保存时的选择（有记忆 = 上次勾了）
+  const [remember, setRemember] = useState(() => (editing ? false : memory != null));
   // 选择题选项：默认摆出 A–D 四个空框（留空保存即非选择题）；编辑已有题带出已存的选项
   const [options, setOptions] = useState<string[]>(() =>
     editing && editing.options.length > 0 ? [...editing.options] : ["", "", "", ""],
@@ -34,13 +72,11 @@ export function EntryView({
   const [answer, setAnswer] = useState<number | null>(() => (editing ? editing.answer : null));
   const [flash, setFlash] = useState("");
 
-  /** 过滤空选项；全空 = 非选择题 */
-  const cleanOptions = () => options.map(o => o.trim()).filter(Boolean);
+  /** 旧数据可能带选项内容（现在的流程选项文字直接写在题目里）；有内容且未标记答案时不能保存 */
+  const hasOptionContent = () => options.some(o => o.trim().length > 0);
 
-  const optionsReady = () => {
-    const opts = cleanOptions();
-    return opts.length === 0 || answer !== null; // 填了选项必须标记正确答案
-  };
+  /** 标记了字母 = 选择题；未标记 = 非选择题（有已录内容时除外，须标记） */
+  const optionsReady = () => answer !== null || !hasOptionContent();
 
   // 表单最新值镜像：卸载时兜底保存用
   const formRef = useRef({ qBlocks, aBlocks, tags, folderIds, options, answer, editId });
@@ -52,8 +88,8 @@ export function EntryView({
       const f = formRef.current;
       if (!f.editId) return; // 新题只认显式保存
       const target = getMistake(f.editId);
-      const opts = f.options.map(o => o.trim()).filter(Boolean);
-      if (target && !isBlocksEmpty(f.qBlocks) && (opts.length === 0 || f.answer !== null)) {
+      const opts = f.answer !== null ? f.options.map(o => o.trim()) : [];
+      if (target && !isBlocksEmpty(f.qBlocks) && (f.answer !== null || !f.options.some(o => o.trim()))) {
         void updateMistake({
           ...target,
           question: f.qBlocks,
@@ -61,7 +97,7 @@ export function EntryView({
           tags: f.tags,
           folderIds: f.folderIds,
           options: opts,
-          answer: opts.length > 0 ? f.answer : null,
+          answer: f.answer,
           updatedAt: Date.now(),
         });
       }
@@ -77,7 +113,8 @@ export function EntryView({
   };
 
   const buildMistake = (): Mistake => {
-    const opts = cleanOptions();
+    // 标记了答案 = 选择题（选项字母数即选项数，内容可为空——选项文字通常直接写在题目里）；未标记 = 非选择题
+    const opts = answer !== null ? options.map(o => o.trim()) : [];
     return {
       id: editing?.id ?? uuid(),
       folderIds,
@@ -93,14 +130,22 @@ export function EntryView({
     };
   };
 
+  /** 新录时按「记住」开关落记忆：勾 = 存当前文件夹+标签；不勾 = 清掉旧记忆 */
+  const persistMemory = () => {
+    if (editing) return;
+    if (remember) localStorage.setItem(MEMORY_KEY, JSON.stringify({ folders: folderIds, tags } satisfies EntryMemory));
+    else localStorage.removeItem(MEMORY_KEY);
+  };
+
   const saveAndNext = async () => {
     if (!valid) return;
     if (!optionsReady()) {
-      showFlash("已填选项：请点 A / B / C / D 选中正确答案，或清空选项");
+      showFlash("已录选项内容：请点 A / B / C / D 标记正确答案，或清除内容后保存");
       return;
     }
     const m = buildMistake();
     await addMistake(m);
+    persistMemory();
     setQBlocks([newTextNode("")]);
     setABlocks([newTextNode("")]);
     // 标签和文件夹保留，方便连续录入同一章节的题；选项恢复为空白 A–D
@@ -112,11 +157,14 @@ export function EntryView({
   const saveAndDone = async () => {
     if (!valid) return;
     if (!optionsReady()) {
-      showFlash("已填选项：请点 A / B / C / D 选中正确答案，或清空选项");
+      showFlash("已录选项内容：请点 A / B / C / D 标记正确答案，或清除内容后保存");
       return;
     }
     if (editing) await updateMistake(buildMistake());
-    else await addMistake(buildMistake());
+    else {
+      await addMistake(buildMistake());
+      persistMemory();
+    }
     onDone();
   };
 
@@ -125,8 +173,8 @@ export function EntryView({
     if (!editing) return;
     const timer = window.setTimeout(() => {
       const target = editingRef.current;
-      const opts = options.map(o => o.trim()).filter(Boolean);
-      if (!target || isBlocksEmpty(qBlocks) || (opts.length > 0 && answer === null)) return;
+      if (!target || isBlocksEmpty(qBlocks) || (hasOptionContent() && answer === null)) return;
+      const opts = answer !== null ? options.map(o => o.trim()) : [];
       void updateMistake({
         ...target,
         question: qBlocks,
@@ -159,89 +207,89 @@ export function EntryView({
   return (
     <div className="entry">
       <div className="entry-head">
-        <h2>{editing ? "编辑错题" : "录入错题"}</h2>
+        <h2>
+          {editing ? "编辑错题" : "录入错题"}
+          {!editing && (
+            <span className="entry-mode muted">
+              {presetFolders?.length ? "· 文件夹录入" : presetTags?.length ? "· 标签录入" : "· 普通录入"}
+            </span>
+          )}
+        </h2>
         {!editing && (
-          <button className="btn btn-sm" onClick={onGoBatch}>
-            📂 批量导入文件夹截图
+          <button className="btn btn-sm" title="把整个文件夹的截图一次性导入" onClick={onGoBatch}>
+            批量导入
           </button>
         )}
       </div>
 
+      {/* 元信息工具条：所属 + 标签（同款下拉，高度一致） + 记住开关 */}
       <div className="entry-meta">
         <FolderSelect value={folderIds} onChange={setFolderIds} />
-        <TagInput value={tags} onChange={setTags} suggestions={allTags} />
+        <TagSelect value={tags} onChange={setTags} suggestions={allTags} />
+        {!editing && (
+          <label
+            className="entry-remember"
+            title="记住当前的文件夹与标签，下次从任何入口（普通/文件夹/标签）录入都自动带上；不勾则清除记忆"
+          >
+            <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
+            记住
+          </label>
+        )}
       </div>
 
-      <BlockEditor
-        label="题目"
-        blocks={qBlocks}
-        onChange={setQBlocks}
-        placeholder="输入题目文字，或直接粘贴截图 / 拖入图片"
-        autoFocus={!editing}
-      />
+      <BlockEditor label="题目" blocks={qBlocks} onChange={setQBlocks} autoFocus={!editing} />
 
-      {/* 选择题选项（题目之后、解析之前）：默认 A–D 四个框；点 A/B/C/D 字母选出正确答案；全留空 = 非选择题 */}
-      <div className="options-editor">
-        <div className="page-label">
-          选项
-          <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>
-            点 A / B / C / D 选中正确答案；全留空 = 非选择题（不计错误率）
-          </span>
-        </div>
-        {options.map((o, i) => (
-          <div key={i} className="option-row">
+      {/* 选项条：字母标记正确答案（点已选字母即取消 = 转回非选择题），＋/－ 增减字母 */}
+      <div className="options-bar">
+        <span className="page-label">选项</span>
+        <div className="option-flow">
+          {options.map((o, i) => (
             <button
               type="button"
+              key={i}
               className={`option-letter-btn ${answer === i ? "on" : ""}`}
-              title={`标记 ${String.fromCharCode(65 + i)} 为正确答案`}
-              onClick={() => setAnswer(i)}
+              title={
+                o.trim()
+                  ? `标记 ${String.fromCharCode(65 + i)}（${o.trim()}）为正确答案`
+                  : `标记 ${String.fromCharCode(65 + i)} 为正确答案`
+              }
+              onClick={() => setAnswer(answer === i ? null : i)}
             >
               {String.fromCharCode(65 + i)}
             </button>
-            <input
-              className="modal-input option-input"
-              value={o}
-              placeholder={`选项 ${String.fromCharCode(65 + i)} 内容`}
-              onChange={e => setOptions(opts => opts.map((x, j) => (j === i ? e.target.value : x)))}
-            />
-            <button
-              type="button"
-              className="btn btn-sm"
-              title="删除该选项"
-              onClick={() => {
-                setOptions(opts => opts.filter((_, j) => j !== i));
-                setAnswer(a => (a === i ? null : a !== null && a > i ? a - 1 : a));
-              }}
-            >
-              ✕
-            </button>
-          </div>
-        ))}
-        <div className="row-actions">
-          {options.length < 8 && (
-            <button type="button" className="btn btn-sm" onClick={() => setOptions(opts => [...opts, ""])}>
-              ＋ 添加选项
-            </button>
-          )}
-          {options.length > 0 && (
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => {
-                setOptions([]);
-                setAnswer(null);
-              }}
-            >
-              清空（转为非选择题）
-            </button>
-          )}
+          ))}
         </div>
+        <span className="options-acts">
+          {options.length < 8 && (
+            <button type="button" className="opt-act" title="添加一个选项字母" onClick={() => setOptions(opts => [...opts, ""])}>
+              ＋
+            </button>
+          )}
+          {options.length > 2 && (
+            <button
+              type="button"
+              className="opt-act"
+              title="删除最后一个选项字母"
+              onClick={() => {
+                setOptions(opts => opts.slice(0, -1));
+                setAnswer(a => (a !== null && a >= options.length - 1 ? null : a));
+              }}
+            >
+              －
+            </button>
+          )}
+        </span>
       </div>
+      {/* 旧数据里已录的选项内容：只读展示，保存时原样保留 */}
+      {hasOptionContent() && (
+        <div className="muted option-content-note">
+          已录选项内容：{options.map((o, i) => `${String.fromCharCode(65 + i)}. ${o.trim()}`).join("　")}
+        </div>
+      )}
 
-      <BlockEditor label="解析" blocks={aBlocks} onChange={setABlocks} placeholder="输入解析文字，或粘贴解析截图" />
+      <BlockEditor label="解析" blocks={aBlocks} onChange={setABlocks} />
 
       <div className="entry-foot">
-        <span className="muted">图片四通道：粘贴截图 · 拖入文件 · 📎 选择文件 · 输入路径{editing && " · 修改会自动保存"}</span>
         <div className="row-actions">
           {editing ? (
             <>

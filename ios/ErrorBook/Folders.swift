@@ -67,3 +67,9 @@ func countUncategorized(_ mistakes: [Mistake], _ folders: [Folder]) -> Int {
   let ids = Set(folders.map { $0.id })
   return mistakes.filter { m in !m.folderIds.contains { ids.contains($0) } }.count
 }
+
+/// 已分类 = 至少属于一个（仍存在的）文件夹，与未分类互补
+func countCategorized(_ mistakes: [Mistake], _ folders: [Folder]) -> Int {
+  let ids = Set(folders.map { $0.id })
+  return mistakes.filter { m in m.folderIds.contains { ids.contains($0) } }.count
+}

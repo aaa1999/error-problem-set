@@ -162,6 +162,15 @@ struct EntrySheet: View {
   @Environment(\.dismiss) private var dismiss
 
   let editing: Mistake?
+  /// 录入入口预设：文件夹录入 / 标签录入带入；进去后仍可调整
+  var presetFolders: [String] = []
+  var presetTags: [String] = []
+
+  // 录入记忆：勾「记住标签与文件夹」保存后，下次从任何入口录入自动带上（显式预设优先）
+  @AppStorage("entryMemoryOn") private var memoryOn = false
+  @AppStorage("entryMemoryFolders") private var memoryFoldersRaw = ""
+  @AppStorage("entryMemoryTags") private var memoryTagsRaw = ""
+  @State private var remember = false
 
   @State private var qBlocks: [Block] = []
   @State private var aBlocks: [Block] = []
@@ -185,6 +194,13 @@ struct EntrySheet: View {
             Spacer()
           }
           TagInput(tags: $tags, suggestions: store.allTags)
+          if editing == nil {
+            Toggle(isOn: $remember) {
+              Text("记住标签与文件夹").font(.caption)
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+          }
           BlockEditor(label: "题目", blocks: $qBlocks, placeholder: "输入题目文字，或插入截图")
           optionsEditor // 题目之后、解析之前
           BlockEditor(label: "解析", blocks: $aBlocks, placeholder: "输入解析文字，或插入解析截图")
@@ -196,7 +212,7 @@ struct EntrySheet: View {
         }
         .padding()
       }
-      .navigationTitle(editing != nil ? "编辑错题" : "录入错题")
+      .navigationTitle(editing != nil ? "编辑错题" : !presetFolders.isEmpty ? "文件夹录入" : !presetTags.isEmpty ? "标签录入" : "录入错题")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
@@ -234,6 +250,12 @@ struct EntrySheet: View {
           qBlocks = [.text(id: UUID().uuidString.lowercased(), text: "")]
           aBlocks = [.text(id: UUID().uuidString.lowercased(), text: "")]
           options = ["", "", "", ""] // 默认摆出 A–D 四个空框，留空保存即非选择题
+          // 初始标签/所属：显式预设（文件夹/标签录入）> 记住的值
+          let memFolders = memoryFoldersRaw.split(separator: "\n").map(String.init)
+          let memTags = memoryTagsRaw.split(separator: "\n").map(String.init)
+          folderIds = !presetFolders.isEmpty ? presetFolders : (memoryOn ? memFolders : [])
+          tags = !presetTags.isEmpty ? presetTags : (memoryOn ? memTags : [])
+          remember = memoryOn
         }
       }
       .onDisappear {
@@ -255,73 +277,73 @@ struct EntrySheet: View {
     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
   }
 
-  // MARK: 选择题选项编辑器（选填，填了并标记正确答案，浏览时即可作答计错误率）
+  // MARK: 选择题选项编辑（字母标记正确答案，选项文字直接写在题目里；不标记 = 非选择题）
 
   @ViewBuilder
   private var optionsEditor: some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack {
         Text("选项").font(.footnote.bold()).foregroundStyle(.secondary)
-        if !options.isEmpty {
-          Text("点 A / B / C / D 选中正确答案；全留空 = 非选择题").font(.caption).foregroundStyle(.tertiary)
-        }
+        Text("点字母标记正确答案；不标记 = 非选择题").font(.caption2).foregroundStyle(.tertiary)
         Spacer()
         if options.count < 8 {
           Button {
             options.append("")
           } label: {
-            Label("添加选项", systemImage: "plus")
+            Label("添加", systemImage: "plus")
           }
           .font(.footnote)
           .buttonStyle(.bordered)
         }
-        if !options.isEmpty {
+        if options.count > 2 {
           Button {
-            options = ["", "", "", ""]
-            answer = nil
+            options.removeLast()
+            if let a = answer, a >= options.count { answer = nil }
           } label: {
-            Label("清空", systemImage: "trash")
+            Label("删一个", systemImage: "minus")
           }
           .font(.footnote)
           .buttonStyle(.bordered)
         }
       }
-      ForEach(options.indices, id: \.self) { i in
-        HStack(spacing: 8) {
-          // A/B/C/D 字母徽章：点击即选中为正确答案（实心高亮）
+      // 字母圆钮一行排开：点击标记正确答案（实心高亮），再点一次取消
+      HStack(spacing: 12) {
+        ForEach(options.indices, id: \.self) { i in
           Button {
-            answer = i
+            answer = (answer == i ? nil : i)
           } label: {
             Text(String(UnicodeScalar(UInt8(65 + i))))
               .font(.subheadline.bold())
-              .frame(width: 26, height: 26)
+              .frame(width: 36, height: 36)
               .background(Circle().fill(answer == i ? Color.accentColor : Color(.systemGray5)))
               .foregroundStyle(answer == i ? Color.white : Color.secondary)
               .overlay(
-                Circle().strokeBorder(answer == i ? Color.accentColor : Color.clear, lineWidth: 1.5)
+                Circle().strokeBorder(answer == i ? Color.accentColor : .clear, lineWidth: 1.5)
               )
           }
           .buttonStyle(.plain)
-          TextField("选项 \(String(UnicodeScalar(UInt8(65 + i)))) 内容", text: $options[i])
-            .textFieldStyle(.roundedBorder)
-          Button {
-            options.remove(at: i)
-            if answer == i {
-              answer = nil
-            } else if let a = answer, a > i {
-              answer = a - 1
-            }
-          } label: {
-            Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
-          }
-          .buttonStyle(.plain)
+          .accessibilityLabel("选项 \(String(UnicodeScalar(UInt8(65 + i))))\(answer == i ? "，已标记为正确答案" : "")")
         }
+      }
+      // 旧数据里已录的选项内容：只读展示，保存时原样保留
+      if options.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+        Text(
+          "已录选项内容："
+            + options.enumerated()
+              .map {
+                "\(String(UnicodeScalar(UInt8(65 + $0.offset)))). \($0.element.trimmingCharacters(in: .whitespacesAndNewlines))"
+              }
+              .joined(separator: "　")
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
       }
     }
   }
 
   private func build() -> Mistake {
-    let opts = options.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    // 标记了答案 = 选择题（选项字母数即选项数，内容可为空——选项文字通常直接写在题目里）；未标记 = 非选择题
+    let opts = answer != nil ? options.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } : []
     return Mistake(
       id: editing?.id ?? UUID().uuidString.lowercased(),
       folderIds: folderIds,
@@ -337,16 +359,29 @@ struct EntrySheet: View {
     )
   }
 
-  /// 填了选项必须标记正确答案（或清空选项）
+  /// 有旧选项内容时必须标记正确答案；纯字母标记可留空（不标记 = 非选择题）
   private var optionsReady: Bool {
-    let opts = options.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-    return opts.isEmpty || answer != nil
+    answer != nil || !options.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+  }
+
+  /// 新录时按「记住」开关落记忆：勾 = 存当前文件夹+标签；不勾 = 清掉旧记忆
+  private func persistMemory() {
+    guard editing == nil else { return }
+    if remember {
+      memoryFoldersRaw = folderIds.joined(separator: "\n")
+      memoryTagsRaw = tags.joined(separator: "\n")
+      memoryOn = true
+    } else {
+      memoryFoldersRaw = ""
+      memoryTagsRaw = ""
+      memoryOn = false
+    }
   }
 
   private func saveAndNext() {
     guard valid else { return }
     guard optionsReady else {
-      flash = "已填选项：请点 A / B / C / D 选中正确答案，或清空选项"
+      flash = "已录选项内容：请点字母标记正确答案"
       Task { @MainActor in
         try? await Task.sleep(nanoseconds: 1_800_000_000)
         flash = ""
@@ -354,6 +389,7 @@ struct EntrySheet: View {
       return
     }
     store.addMistake(build())
+    persistMemory()
     qBlocks = [.text(id: UUID().uuidString.lowercased(), text: "")]
     aBlocks = [.text(id: UUID().uuidString.lowercased(), text: "")]
     options = ["", "", "", ""] // 选项恢复为空白 A–D，下一题从新开始
@@ -371,6 +407,7 @@ struct EntrySheet: View {
       store.updateMistake(build())
     } else {
       store.addMistake(build())
+      persistMemory()
     }
     dismiss()
   }

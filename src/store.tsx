@@ -29,6 +29,8 @@ export interface Book {
   createFolder: (name: string, parentId: string | null) => Promise<Folder>;
   /** 按名称+父级查找，没有就创建（批量导入按源结构落位用） */
   findOrCreateFolder: (name: string, parentId: string | null) => Promise<Folder>;
+  /** 文件夹名支持 a/b/c 层级：按 / 拆段逐级查找或创建，返回最深层级 */
+  findOrCreateFolderPath: (path: string, baseParentId: string | null) => Promise<Folder>;
   renameFolder: (id: string, name: string) => Promise<void>;
   /** 拖动重挂父级：新父级不能是自己或自己的后代（防环） */
   moveFolder: (id: string, parentId: string | null) => Promise<void>;
@@ -169,6 +171,21 @@ export function BookProvider({ children }: { children: ReactNode }) {
       return f;
     },
     [persist],
+  );
+
+  /** 文件夹名支持 a/b/c 层级：按 / 拆段，从 baseParent 起逐级查找或创建，返回最深层级文件夹 */
+  const findOrCreateFolderPath = useCallback(
+    async (path: string, baseParentId: string | null) => {
+      let parentId = baseParentId;
+      let current: Folder | null = null;
+      for (const seg of path.split("/").map(s => s.trim()).filter(Boolean)) {
+        current = await findOrCreateFolder(seg, parentId);
+        parentId = current.id;
+      }
+      if (!current) throw new Error("文件夹名不能为空");
+      return current;
+    },
+    [findOrCreateFolder],
   );
 
   const renameFolder = useCallback(
@@ -322,6 +339,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       setMistakeFolders,
       createFolder,
       findOrCreateFolder,
+      findOrCreateFolderPath,
       renameFolder,
       moveFolder,
       deleteFolder,
@@ -351,6 +369,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       setMistakeFolders,
       createFolder,
       findOrCreateFolder,
+      findOrCreateFolderPath,
       renameFolder,
       moveFolder,
       deleteFolder,

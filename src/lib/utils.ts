@@ -33,6 +33,13 @@ export function formatTime(ms: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** 天级时间（本地时区），用于按导入日期分组 */
+export function formatDay(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 /** 只保留路径最后两级，用于顶栏展示 */
 export function shortDir(p: string): string {
   const parts = p.split(/[\\/]/).filter(Boolean);

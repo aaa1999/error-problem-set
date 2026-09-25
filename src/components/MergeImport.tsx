@@ -107,11 +107,6 @@ export function MergeImport() {
 
   return (
     <div className="page-card" style={{ marginTop: 16 }}>
-      <div className="page-label">或：从另一份错题本数据目录合并</div>
-      <p className="muted">
-        把其他机器的数据文件夹拷过来（U 盘、网盘、聊天传输都行），选择它即可，题目、文件夹、标签整体合并进来。
-        选到上一级也没关系，会自动向下识别（最多两层）；已导入过的自动跳过，图片按内容哈希去重，可重复执行。
-      </p>
       {result ? (
         <div className="row-actions spread">
           <span className="muted">{result}</span>

@@ -126,7 +126,7 @@ private struct SetupForm: View {
           }
         }
       } header: {
-        Text("文件夹名（导入时按名称查找，没有会自动创建）")
+        Text("文件夹名")
       }
       Section {
         HStack {
@@ -144,8 +144,6 @@ private struct SetupForm: View {
         Button(hasSession ? "重新开始一组" : "开始做题", action: onStart)
           .buttonStyle(.borderedProminent)
           .frame(maxWidth: .infinity)
-      } footer: {
-        Text("外部刷题的答题卡：逐题选 A/B/C/D，做完输入正确答案比对；答错的和标记 ⭐ 的题可一键导入错题本（之后在错题本里补题目内容和图）。")
       }
     }
   }
@@ -266,7 +264,8 @@ struct PracticePhaseView: View {
     var s = sheet
     var applied = 0
     var bad = 0
-    for raw in keyBulk.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
+    // 按 isNewline 分行：\r\n 在 Swift 里是一个字符，用 == "\n" 判不开（CRLF 粘贴会整段挤成一行）
+    for raw in keyBulk.split(whereSeparator: \.isNewline) {
       let line = raw.trimmingCharacters(in: .whitespaces)
       if line.isEmpty { continue }
       // 形如 1<Tab>A / 1 A / 1,A
@@ -499,7 +498,7 @@ struct PracticePhaseView: View {
 
   /// 导入一题：在会话文件夹里生成占位条目（题干待补），批改记录写进解析
   private func importOne(_ i: Int, into s: inout PracticeSheet) {
-    let folder = s.folderName.isEmpty ? nil : store.findOrCreateFolder(name: s.folderName, parentId: nil)
+    let folder = s.folderName.isEmpty ? nil : store.findOrCreateFolderPath(s.folderName, baseParentId: nil)
     let record: String
     switch s.verdict(i) {
     case "wrong": record = "我选 \(s.mine[i] ?? "未作答")，正确答案 \(s.key[i] ?? "未对")"

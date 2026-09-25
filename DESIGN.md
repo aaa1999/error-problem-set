@@ -388,3 +388,28 @@ interface Database {
 - **手机端（iOS）**：做题结果页新增「存为待导入清单（推送后在电脑导入）」——把勾选的题（题号、我的答案、正确答案、⭐ 标记）连同文件夹名存进库；之后正常「☁ 同步 → 推送」即上服务器
 - **电脑端（桌面）**：「☁ 同步 → 从远程拉取」合并清单后，做题 tab 设置页下方出现「来自手机做题的待导入清单」——每份显示文件夹、题数、待导入题号，可「导入 N 题」（在对应文件夹生成占位错题，批改记录写进解析）或「丢弃」；导入完成清单自动移除
 - 手机上仍可保留原来的直接导入路径；清单只是多了一种「拿回电脑慢慢补内容」的选择
+
+## 18. 浏览页题号总览（v0.8.2）
+
+浏览时把当前筛选（文件夹 + 标签）下的全部题一键展开成题号网格，点题号直接跳到那道题——一个标签里有哪几题、一个文件夹里攒了多少错题，一眼看清，不用一页页翻：
+
+- **入口**：桌面端顶栏「▦ 第 N / M 题」进度字样可点；iOS 端底栏页码（带网格图标）可点，打开题号总览弹层
+- **网格**：题号 = 当前排列（时间 / 错误率 / 随机）下的序号；配色沿用做题结果页的直觉——红 = 错过（wrong > 0）、绿 = 作答全对、灰 = 未作答 / 非选择题；当前题蓝框描边，打开时自动滚到当前题
+- **跳转**：点题号关闭弹层并翻到那道题（作答与翻开状态照常重置）；筛选条件或排列方式变化后总览随之更新
+
+## 19. Android 端（v0.8.2）
+
+`android/` 目录是 iOS 端的原生镜像（Kotlin + Jetpack Compose + Material 3，单 Activity 四 tab），数据层与交互口径逐条对齐 iOS 端实现（Models / BookStore / ImageStore / Folders / Markdown / MergeImport / SyncEngine / CopyExport / NoteExporter / Components / 各 View 一一对应），功能与已知边界见 docs/android.md。平台能力映射：
+
+| iOS | Android |
+| --- | --- |
+| SwiftUI TabView 四 tab | Scaffold + NavigationBar 四 tab（movableContent 保活） |
+| PhotosPicker 相册选图 | Photo Picker（PickVisualMedia / PickMultipleVisualMedia） |
+|「文件」App 选文件夹（安全作用域）| SAF（OpenDocumentTree + DocumentFile 递归扫描，持久化 Uri 权限） |
+| UIPasteboard 双分量（plainText + HTML）| ClipData.newHtmlText（纯文本 + HTML 双分量） |
+| UIMarkupTextPrintFormatter 原生分页 PDF | WebView + PrintManager 系统打印框架（A4、文字可选中，「保存为 PDF」） |
+| 沙盒 Documents/错题本（文件 App 可见）| 外部私有目录 Android/data/…/files/错题本（免权限、USB/MTP 可拷，卸载即删） |
+| NSAllowsArbitraryLoads 放行局域网 http | usesCleartextTraffic |
+| @AppStorage | SharedPreferences（键名沿用桌面/iOS：browseOrder、practiceFolderName、entryMemory*、errorbook.sync.server） |
+
+实现约定：数据读写全部走同一套宽容序列化（字段缺失/null/类型不符回退默认值，旧 folderId 单值自动迁移）；落盘为原子写 + snapshots 限流 20 份，与桌面/iOS 完全同构；纯逻辑层（序列化、Markdown 渲染、做题答案解析、文件夹树、稳定洗牌、合并差量）带 JVM 单元测试（`./gradlew testDebugUnitTest`）。

@@ -1,7 +1,7 @@
 import { useMemo, useState, type DragEvent } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import type { Folder, Mistake } from "../types";
-import { countInFolder, countUncategorized, descendantSet, groupByParent } from "../lib/folders";
+import { countCategorized, countInFolder, countUncategorized, descendantSet, groupByParent } from "../lib/folders";
 import { DND_FOLDER, DND_MISTAKE } from "../lib/dnd";
 import { useBook } from "../store";
 import { NameModal } from "./NameModal";
@@ -18,6 +18,10 @@ interface Props {
   mistakesInFolder: Mistake[];
   /** 满足当前标签筛选的错题，用于文件夹计数随标签联动 */
   mistakesMatchingTags: Mistake[];
+  /** 文件夹行上的 ✍：以该文件夹为预设所属进入录入（文件夹录入入口） */
+  onNewInFolder: (folderId: string) => void;
+  /** 标签行上的 ✍：以该标签为预设标签进入录入（标签录入入口） */
+  onNewWithTag: (tag: string) => void;
 }
 
 export function Sidebar({
@@ -30,15 +34,17 @@ export function Sidebar({
   onToggleTagMode,
   mistakesInFolder,
   mistakesMatchingTags,
+  onNewInFolder,
+  onNewWithTag,
 }: Props) {
-  const { db, allTags, createFolder, renameFolder, moveFolder, deleteFolder, createTag, getMistake, setMistakeFolders } =
+  const { db, allTags, findOrCreateFolderPath, renameFolder, moveFolder, deleteFolder, createTag, getMistake, setMistakeFolders } =
     useBook();
   const [modal, setModal] = useState<
     { title: string; initial: string; placeholder?: string; onOk: (name: string) => void } | null
   >(null);
   // 拖动中的文件夹 id：dragover 阶段读不到负载数据，只能靠它把「自己/自己的后代」排除出可落目标
   const [draggingFolderId, setDraggingFolderId] = useState<string | null>(null);
-  const [rootHover, setRootHover] = useState<"all" | "uncat" | null>(null);
+  const [rootHover, setRootHover] = useState<"all" | "cat" | "uncat" | null>(null);
   const byParent = groupByParent(db.folders);
 
   // 标签计数限定在当前文件夹范围内，点选后数量对得上
@@ -48,12 +54,16 @@ export function Sidebar({
     return m;
   }, [mistakesInFolder]);
 
+  // 名称支持 a/b/c：在 parent 下按层级逐级创建（顶层新建 = 从根开始）
   const askNewFolder = (parentId: string | null) =>
     setModal({
       title: parentId ? "新建子文件夹" : "新建文件夹",
       initial: "",
+      placeholder: "名称，可用 / 分层（如 数学/三角函数）",
       onOk: name => {
-        void createFolder(name, parentId).then(f => onSelect(f.id));
+        void findOrCreateFolderPath(name, parentId)
+          .then(f => onSelect(f.id))
+          .catch(() => {}); // 只输入了 / 的极端情况：静默忽略
       },
     });
 
@@ -105,6 +115,11 @@ export function Sidebar({
 
   const hasPayload = (e: DragEvent, ...types: string[]) => types.some(t => e.dataTransfer.types.includes(t));
 
+  // 全部错题 = 树根：下分「已分类」（收着整个文件夹树）与「未分类」，均可折叠
+  const [rootOpen, setRootOpen] = useState(true);
+  const [catOpen, setCatOpen] = useState(true);
+  const topLevel = byParent.get(null) ?? [];
+
   return (
     <aside className="sidebar">
       <div className="side-section">
@@ -112,9 +127,9 @@ export function Sidebar({
           <span>文件夹</span>
           <button onClick={() => askNewFolder(null)}>＋ 新建</button>
         </div>
-        <button
+        <div
           className={`side-item ${selected === "" ? "active" : ""} ${rootHover === "all" ? "drop-target" : ""}`}
-          title="拖文件夹到此处 = 移到顶层"
+          title="全部错题；拖文件夹到此处 = 移到顶层（作为它的直接子级）"
           onClick={() => onSelect("")}
           onDragOver={e => {
             if (hasPayload(e, DND_FOLDER)) {
@@ -128,49 +143,98 @@ export function Sidebar({
             dropFolderOn(e, null);
           }}
         >
+          <button
+            className="fold-toggle"
+            title={rootOpen ? "收起" : "展开"}
+            onClick={e => {
+              e.stopPropagation();
+              setRootOpen(!rootOpen);
+            }}
+          >
+            {topLevel.length > 0 ? (rootOpen ? "▾" : "▸") : "·"}
+          </button>
           <span className="folder-name">全部错题</span>
           <span className="count">{mistakesMatchingTags.length}</span>
-        </button>
-        <button
-          className={`side-item ${selected === "uncat" ? "active" : ""} ${rootHover === "uncat" ? "drop-target" : ""}`}
-          title="拖错题到此处 = 移出所有文件夹（未分类）"
-          onClick={() => onSelect("uncat")}
-          onDragOver={e => {
-            if (hasPayload(e, DND_MISTAKE)) {
-              e.preventDefault();
-              setRootHover("uncat");
-            }
-          }}
-          onDragLeave={() => setRootHover(h => (h === "uncat" ? null : h))}
-          onDrop={e => {
-            setRootHover(null);
-            dropMistakeOn(e, null);
-          }}
-        >
-          <span className="folder-name">未分类</span>
-          <span className="count">{countUncategorized(mistakesMatchingTags, db.folders)}</span>
-        </button>
-        <div className="side-tree">
-          {(byParent.get(null) ?? []).map(f => (
-            <FolderNode
-              key={f.id}
-              folder={f}
-              depth={0}
-              selected={selected}
-              onSelect={onSelect}
-              onNewSub={askNewFolder}
-              onRename={askRename}
-              onDelete={f2 => void askDelete(f2)}
-              mistakes={mistakesMatchingTags}
-              folders={db.folders}
-              byParent={byParent}
-              draggingFolderId={draggingFolderId}
-              setDraggingFolderId={setDraggingFolderId}
-              dropMistakeOn={dropMistakeOn}
-              dropFolderOn={dropFolderOn}
-            />
-          ))}
         </div>
+        {(rootOpen || topLevel.length === 0) && (
+          <>
+            {/* 已分类：至少属于一个文件夹的题；文件夹树都收在它下面 */}
+            <div
+              className={`side-item ${selected === "cat" ? "active" : ""} ${rootHover === "cat" ? "drop-target" : ""}`}
+              style={{ paddingLeft: 22 }}
+              title="已分类：至少属于一个文件夹的题；拖文件夹到此处 = 移到顶层"
+              onClick={() => onSelect("cat")}
+              onDragOver={e => {
+                if (hasPayload(e, DND_FOLDER)) {
+                  e.preventDefault();
+                  setRootHover("cat");
+                }
+              }}
+              onDragLeave={() => setRootHover(h => (h === "cat" ? null : h))}
+              onDrop={e => {
+                setRootHover(null);
+                dropFolderOn(e, null);
+              }}
+            >
+              <button
+                className="fold-toggle"
+                title={catOpen ? "收起" : "展开"}
+                onClick={e => {
+                  e.stopPropagation();
+                  setCatOpen(!catOpen);
+                }}
+              >
+                {topLevel.length > 0 ? (catOpen ? "▾" : "▸") : "·"}
+              </button>
+              <span className="folder-name">已分类</span>
+              <span className="count">{countCategorized(mistakesMatchingTags, db.folders)}</span>
+            </div>
+            {(catOpen || topLevel.length === 0) && (
+              <div className="side-tree" style={{ paddingLeft: 36 }}>
+                {topLevel.map(f => (
+                  <FolderNode
+                    key={f.id}
+                    folder={f}
+                    depth={0}
+                    selected={selected}
+                    onSelect={onSelect}
+                    onNewSub={askNewFolder}
+                    onNewIn={onNewInFolder}
+                    onRename={askRename}
+                    onDelete={f2 => void askDelete(f2)}
+                    mistakes={mistakesMatchingTags}
+                    folders={db.folders}
+                    byParent={byParent}
+                    draggingFolderId={draggingFolderId}
+                    setDraggingFolderId={setDraggingFolderId}
+                    dropMistakeOn={dropMistakeOn}
+                    dropFolderOn={dropFolderOn}
+                  />
+                ))}
+              </div>
+            )}
+            <button
+              className={`side-item side-uncat ${selected === "uncat" ? "active" : ""} ${rootHover === "uncat" ? "drop-target" : ""}`}
+              style={{ paddingLeft: 22 }}
+              title="拖错题到此处 = 移出所有文件夹（未分类）"
+              onClick={() => onSelect("uncat")}
+              onDragOver={e => {
+                if (hasPayload(e, DND_MISTAKE)) {
+                  e.preventDefault();
+                  setRootHover("uncat");
+                }
+              }}
+              onDragLeave={() => setRootHover(h => (h === "uncat" ? null : h))}
+              onDrop={e => {
+                setRootHover(null);
+                dropMistakeOn(e, null);
+              }}
+            >
+              <span className="folder-name">未分类</span>
+              <span className="count">{countUncategorized(mistakesMatchingTags, db.folders)}</span>
+            </button>
+          </>
+        )}
       </div>
 
       <div className="side-section">
@@ -195,27 +259,22 @@ export function Sidebar({
         {allTags.map(t => {
           const n = tagCountsInView.get(t) ?? 0;
           return (
-            <button
+            <div
               key={t}
               className={`side-tag ${activeTags.includes(t) ? "active" : ""} ${n === 0 ? "dim" : ""}`}
-              title={n === 0 ? "当前文件夹范围内没有带此标签的题" : `${n} 题`}
+              title={n === 0 ? "当前文件夹范围内没有带此标签的题" : `${n} 题；✍ = 录入一道带此标签的题`}
               onClick={() => onToggleTag(t)}
             >
               <span className="folder-name">{t}</span>
               <span className="count">{n}</span>
-            </button>
+              <span className="folder-acts" onClick={e => e.stopPropagation()}>
+                <button title="录入一道带此标签的题（标签录入）" onClick={() => onNewWithTag(t)}>
+                  ✍
+                </button>
+              </span>
+            </div>
           );
         })}
-        {allTags.length > 0 && (
-          <div className="muted side-pad">
-            {activeTags.length === 0
-              ? "点击筛选，可多选，并与文件夹筛选叠加"
-              : tagMode === "and"
-                ? "显示同时包含所有所选标签的题"
-                : "显示包含任一所选标签的题"}
-            ，文件夹与标签同时生效
-          </div>
-        )}
       </div>
 
       {modal && (
@@ -240,6 +299,7 @@ interface NodeProps {
   selected: string;
   onSelect: (s: string) => void;
   onNewSub: (parentId: string) => void;
+  onNewIn: (folderId: string) => void;
   onRename: (f: Folder) => void;
   onDelete: (f: Folder) => void;
   mistakes: Mistake[];
@@ -257,6 +317,7 @@ function FolderNode({
   selected,
   onSelect,
   onNewSub,
+  onNewIn,
   onRename,
   onDelete,
   mistakes,
@@ -322,6 +383,9 @@ function FolderNode({
         </span>
         <span className="count">{countInFolder(mistakes, folders, folder.id)}</span>
         <span className="folder-acts" onClick={e => e.stopPropagation()}>
+          <button title="录入一道题到此文件夹（文件夹录入）" onClick={() => onNewIn(folder.id)}>
+            ✍
+          </button>
           <button title="新建子文件夹" onClick={() => onNewSub(folder.id)}>
             ＋
           </button>
@@ -342,6 +406,7 @@ function FolderNode({
             selected={selected}
             onSelect={onSelect}
             onNewSub={onNewSub}
+            onNewIn={onNewIn}
             onRename={onRename}
             onDelete={onDelete}
             mistakes={mistakes}

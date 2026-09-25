@@ -25,6 +25,15 @@ struct BrowseTab: View {
   @State private var lightbox: URL?
   @State private var newTagOpen = false
   @State private var newTagDraft = ""
+  /// 题号总览：当前筛选（文件夹 + 标签）下的全部题展开成题号，点题号跳题
+  @State private var numOpen = false
+  // 录入三入口：普通 = entryNew；文件夹/标签录入先选目标再进录入页
+  @State private var folderEntryOpen = false
+  @State private var folderEntrySel: [String] = []
+  @State private var folderEntryDraft = ""
+  @State private var tagEntryOpen = false
+  @State private var tagEntrySel: [String] = []
+  @State private var entryPreset: EntryPreset?
 
   private var list: [Mistake] {
     var arr = store.db.mistakes
@@ -32,6 +41,10 @@ struct BrowseTab: View {
     if selectedFolder == "uncat" {
       let ids = Set(folders.map { $0.id })
       arr = arr.filter { m in !m.folderIds.contains { ids.contains($0) } }
+    } else if selectedFolder == "cat" {
+      // 已分类 = 至少属于一个文件夹
+      let ids = Set(folders.map { $0.id })
+      arr = arr.filter { m in m.folderIds.contains { ids.contains($0) } }
     } else if !selectedFolder.isEmpty {
       let set = descendantSet(folders, selectedFolder)
       arr = arr.filter { m in m.folderIds.contains { set.contains($0) } }
@@ -65,6 +78,7 @@ struct BrowseTab: View {
   private var crumb: String {
     if selectedFolder.isEmpty { return "全部错题" }
     if selectedFolder == "uncat" { return "未分类" }
+    if selectedFolder == "cat" { return "已分类" }
     return folderPathName(store.db.folders, selectedFolder)
   }
 
@@ -118,6 +132,16 @@ struct BrowseTab: View {
       } message: {
         Text("预建标签不挂在错题上也保留，方便提前规划标签体系")
       }
+      .sheet(isPresented: $numOpen) {
+        NumberOverviewSheet(list: list, current: index) { i in
+          index = i
+        }
+      }
+      .sheet(isPresented: $folderEntryOpen) { folderEntrySheet }
+      .sheet(isPresented: $tagEntryOpen) { tagEntrySheet }
+      .sheet(item: $entryPreset) { p in
+        EntrySheet(editing: nil, presetFolders: p.folders, presetTags: p.tags)
+      }
     }
     .onChange(of: selectedFolder) { _ in index = 0; revealed = false }
     .onReceive(NotificationCenter.default.publisher(for: .errorbookMoveRequest)) { note in
@@ -163,6 +187,7 @@ struct BrowseTab: View {
     HStack(spacing: 10) {
       Menu {
         Button("全部错题") { selectedFolder = "" }
+        Button("已分类（\(countCategorized(store.db.mistakes, store.db.folders))）") { selectedFolder = "cat" }
         Button("未分类（\(countUncategorized(store.db.mistakes, store.db.folders))）") { selectedFolder = "uncat" }
         Divider()
         ForEach(flatFolders(store.db.folders), id: \.folder.id) { item in
@@ -323,9 +348,18 @@ struct BrowseTab: View {
 
       Spacer()
 
-      Text("\(list.count > 0 ? index + 1 : 0) / \(list.count)")
-        .font(.footnote.monospacedDigit())
+      Button {
+        numOpen = true
+      } label: {
+        HStack(spacing: 5) {
+          Image(systemName: "square.grid.3x3")
+          Text("\(list.count > 0 ? index + 1 : 0) / \(list.count)")
+            .monospacedDigit()
+        }
+        .font(.footnote)
         .foregroundStyle(.secondary)
+      }
+      .accessibilityLabel("题号总览，当前第 \(index + 1) 题，共 \(list.count) 题")
 
       Spacer()
 
@@ -344,14 +378,104 @@ struct BrowseTab: View {
   @ToolbarContentBuilder
   private var toolbarContent: some ToolbarContent {
     ToolbarItemGroup(placement: .topBarTrailing) {
+      // 录入三入口：普通 / 文件夹 / 标签
       Menu {
-        Button { entryNew = true } label: { Label("录入错题", systemImage: "square.and.pencil") }
+        Button { entryNew = true } label: { Label("普通录入", systemImage: "square.and.pencil") }
+        Button {
+          folderEntrySel = []
+          folderEntryOpen = true
+        } label: { Label("文件夹录入", systemImage: "folder.badge.plus") }
+        Button {
+          tagEntrySel = []
+          tagEntryOpen = true
+        } label: { Label("标签录入", systemImage: "tag.badge.plus") }
+        Divider()
         Button { batchOpen = true } label: { Label("批量导入截图", systemImage: "photo.on.rectangle.angled") }
       } label: {
         Label("添加", systemImage: "plus")
       }
       Button { syncOpen = true } label: { Label("同步", systemImage: "icloud.and.arrow.up") }
     }
+  }
+
+  // MARK: 文件夹录入 / 标签录入：先选目标再进录入页
+
+  private var folderEntrySheet: some View {
+    NavigationStack {
+      List {
+        FolderMultiPicker(folders: store.db.folders, value: $folderEntrySel)
+        // 输入名称直接新建并勾选：支持 a/b/c 层级，从根逐级创建，勾选最深层级
+        Section("新建文件夹") {
+          HStack {
+            TextField("名称，可用 / 分层（如 数学/三角函数）", text: $folderEntryDraft)
+            Button("新建并选中") {
+              let name = folderEntryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+              guard !name.isEmpty else { return }
+              if let f = store.findOrCreateFolderPath(name, baseParentId: nil) {
+                if !folderEntrySel.contains(f.id) { folderEntrySel.append(f.id) }
+              }
+              folderEntryDraft = ""
+            }
+            .disabled(folderEntryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+          }
+        }
+      }
+      .navigationTitle("文件夹录入")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarLeading) { Button("取消") { folderEntryOpen = false } }
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("开始录入") {
+            folderEntryOpen = false
+            entryPreset = EntryPreset(folders: folderEntrySel, tags: [])
+          }
+          .disabled(folderEntrySel.isEmpty)
+        }
+      }
+    }
+    .presentationDetents([.medium, .large])
+  }
+
+  private var tagEntrySheet: some View {
+    NavigationStack {
+      List {
+        if store.allTags.isEmpty {
+          Text("还没有标签：先在标签菜单里新建，或普通录入后在题上打标签")
+            .foregroundStyle(.secondary)
+        } else {
+          ForEach(store.allTags, id: \.self) { t in
+            Button {
+              if let i = tagEntrySel.firstIndex(of: t) {
+                tagEntrySel.remove(at: i)
+              } else {
+                tagEntrySel.append(t)
+              }
+            } label: {
+              HStack {
+                Text(t)
+                Spacer()
+                if tagEntrySel.contains(t) {
+                  Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
+                }
+              }
+            }
+          }
+        }
+      }
+      .navigationTitle("标签录入")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarLeading) { Button("取消") { tagEntryOpen = false } }
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("开始录入") {
+            tagEntryOpen = false
+            entryPreset = EntryPreset(folders: [], tags: tagEntrySel)
+          }
+          .disabled(tagEntrySel.isEmpty)
+        }
+      }
+    }
+    .presentationDetents([.medium, .large])
   }
 
   // MARK: 调整所属文件夹
@@ -416,6 +540,128 @@ struct BrowseTab: View {
 private struct LightboxItem: Identifiable {
   let url: URL
   var id: String { url.absoluteString }
+}
+
+/// 录入入口预设（文件夹录入 / 标签录入）
+private struct EntryPreset: Identifiable {
+  let folders: [String]
+  let tags: [String]
+  var id: String { folders.joined(separator: ",") + "|" + tags.joined(separator: ",") }
+}
+
+// MARK: - 题号总览（对应桌面端 num-overview 弹层）
+// 当前筛选（文件夹 + 标签）与排列方式下的全部题按导入日期分组展开成题号网格：点题号跳题
+// 红 = 错过 · 绿 = 作答全对 · 灰 = 未作答 / 非选择题 · 蓝框 = 当前题
+
+struct NumberOverviewSheet: View {
+  @Environment(\.dismiss) private var dismiss
+  let list: [Mistake]
+  let current: Int
+  let onPick: (Int) -> Void
+
+  private struct DayItem: Identifiable {
+    let i: Int
+    let m: Mistake
+    var id: String { m.id }
+  }
+  private struct DayGroup: Identifiable {
+    let day: String
+    let items: [DayItem]
+    var id: String { day }
+  }
+
+  /// 按导入日期分组：组序跟随当前排列（时间排序下即由旧到新），同一天的题归到同组
+  private var groups: [DayGroup] {
+    var order: [String] = []
+    var byDay: [String: [DayItem]] = [:]
+    for (i, m) in list.enumerated() {
+      let day = formatDay(m.createdAt)
+      if byDay[day] == nil { order.append(day) }
+      byDay[day, default: []].append(DayItem(i: i, m: m))
+    }
+    return order.map { DayGroup(day: $0, items: byDay[$0] ?? []) }
+  }
+
+  var body: some View {
+    NavigationStack {
+      ScrollViewReader { proxy in
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 14) {
+            ForEach(groups) { g in
+              VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                  Text(g.day).font(.footnote.bold()).monospacedDigit()
+                  Text("\(g.items.count) 题").font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
+                  ForEach(g.items) { item in
+                    Button {
+                      onPick(item.i)
+                      dismiss()
+                    } label: {
+                      Text("\(item.i + 1)")
+                        .font(.subheadline.bold().monospacedDigit())
+                        .frame(maxWidth: .infinity, minHeight: 34)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(cellBg(item.m)))
+                        .foregroundStyle(cellFg(item.m))
+                        .overlay(
+                          // 当前题蓝框描边，长列表里好定位
+                          RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(item.i == current ? Color.accentColor : .clear, lineWidth: 2)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .id(item.m.id)
+                    .accessibilityLabel("第 \(item.i + 1) 题\(item.i == current ? "，当前题" : "")，\(formatDay(item.m.createdAt)) 导入\(cellNote(item.m))")
+                  }
+                }
+              }
+            }
+          }
+          .padding(14)
+        }
+        .onAppear {
+          // 打开时滚到当前题
+          if list.indices.contains(current) {
+            proxy.scrollTo(list[current].id, anchor: .center)
+          }
+        }
+      }
+      .navigationTitle("题号总览（\(list.count) 题）")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) { Button("关闭") { dismiss() } }
+      }
+      .safeAreaInset(edge: .bottom) {
+        Text("按导入日期分组 · 红 = 错过 · 绿 = 作答全对 · 灰 = 未作答 / 非选择题；点题号跳转")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .padding(.vertical, 8)
+          .frame(maxWidth: .infinity)
+          .background(.ultraThinMaterial)
+      }
+    }
+    .presentationDetents([.medium, .large])
+  }
+
+  private func cellBg(_ m: Mistake) -> Color {
+    if m.wrong > 0 { return Color.red.opacity(0.15) }
+    if m.attempts > 0 { return Color.green.opacity(0.15) }
+    return Color(.systemGray6)
+  }
+
+  private func cellFg(_ m: Mistake) -> Color {
+    if m.wrong > 0 { return .red }
+    if m.attempts > 0 { return .green }
+    return .secondary
+  }
+
+  private func cellNote(_ m: Mistake) -> String {
+    if m.wrong > 0 { return "，错过 \(m.wrong) 次" }
+    if m.attempts > 0 { return "，作答全对" }
+    return "，未作答"
+  }
 }
 
 // MARK: - 单题卡片
@@ -604,7 +850,17 @@ struct MistakeCardView: View {
   }
 
   private var tagRow: some View {
-    HStack(spacing: 6) {
+    FlowLayout(spacing: 6) {
+      // 所属文件夹 chip：淡灰与标签区分；未分类的题也显示「未分类」
+      if mistake.folderIds.isEmpty {
+        folderChip(name: "未分类")
+      } else {
+        ForEach(mistake.folderIds, id: \.self) { fid in
+          if let f = store.db.folders.first(where: { $0.id == fid }) {
+            folderChip(name: f.name)
+          }
+        }
+      }
       ForEach(mistake.tags, id: \.self) { t in
         TagChip(text: t)
       }
@@ -616,7 +872,20 @@ struct MistakeCardView: View {
           .background(Capsule().fill(Color(.systemGray5)))
           .foregroundStyle(.secondary)
       }
+      .buttonStyle(.plain)
     }
+  }
+
+  private func folderChip(name: String) -> some View {
+    HStack(spacing: 3) {
+      Image(systemName: "folder").font(.system(size: 9))
+      Text(name)
+    }
+    .font(.caption)
+    .padding(.horizontal, 9)
+    .padding(.vertical, 4)
+    .background(Capsule().fill(Color(.systemGray5)))
+    .foregroundStyle(.secondary)
   }
 
   private func moveRequested() {

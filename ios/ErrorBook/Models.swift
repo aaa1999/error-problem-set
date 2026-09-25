@@ -290,6 +290,14 @@ func formatTime(_ ms: Double) -> String {
   return f.string(from: d)
 }
 
+/// 天级时间（本地时区），用于按导入日期分组
+func formatDay(_ ms: Double) -> String {
+  let d = Date(timeIntervalSince1970: ms / 1000)
+  let f = DateFormatter()
+  f.dateFormat = "yyyy-MM-dd"
+  return f.string(from: d)
+}
+
 /// 没有任何有效内容（无文字且无图片）返回 true
 func isBlocksEmpty(_ blocks: [Block]) -> Bool {
   !blocks.contains { b in

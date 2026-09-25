@@ -4,7 +4,7 @@
 
 A standalone, offline, cross-platform mistake notebook: each item pairs a **question** with its **analysis/solution**, supports mixed text and images, and is reviewed one item per page in a flip-through mode. Everything runs locally — no account, no network.
 
-Tech stack: **Tauri 2 + React + TypeScript + Vite**. Design document (Chinese): [DESIGN.md](./DESIGN.md).
+Tech stack: **Tauri 2 + React + TypeScript + Vite** for the desktop app; native **SwiftUI** iOS app (`ios/`, see `docs/ios.md`) and native **Kotlin + Jetpack Compose** Android app (`android/`, see `docs/android.md`), all sharing the exact same data format. Design document (Chinese): [DESIGN.md](./DESIGN.md).
 
 ## Run & Build
 
@@ -36,7 +36,7 @@ Then run `npm install && npm run tauri build`. Outputs:
 - **Five ways to import images**: paste screenshots from the clipboard (multiple at once) · drag & drop files · 📎 file dialog (multi-select, keeps selection order) · type/paste paths (multiple, comma/newline separated) · paste image files copied from Finder/Explorer
 - **Batch import**: recursively scan a folder, natural-sorted by filename; each image becomes a new question or an "analysis ↩" merged into the previous question *of the same folder*; by default subfolders are auto-created mirroring the source structure (or assign a target folder per group); apply one set of tags to everything
 - **Merge data folders**: merge another Error-Notebook data folder (data.json + assets — an old backup, or data from another device) into the current one — items, notes, folders and tags all migrate; folders merge by name, images dedupe by content hash, already-imported items are skipped, safe to re-run
-- **Flip browsing**: one item per page, analysis blurred by default (think first, then reveal), arrow keys / swipe navigation, click to zoom images
+- **Flip browsing**: one item per page, analysis blurred by default (think first, then reveal), arrow keys / swipe navigation, click to zoom images; the page counter opens a **number overview** — every item under the current folder/tag filters as a colored number grid (red = missed, green = all-correct, gray = unanswered), click a number to jump straight to it
 - **Folder management**: multi-level folder tree in the sidebar (create / rename / delete / add subfolder), browsing a folder includes its subfolders, one-click move for the current item
 - **Multiple tags** per item; sidebar tag filtering is multi-select with an AND/OR toggle; folder × tag filters combine, with counts updating live on both sides
 - Editing an existing item **auto-saves** ~1s after you stop typing

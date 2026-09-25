@@ -151,6 +151,19 @@ final class BookStore: ObservableObject {
     return f
   }
 
+  /// 文件夹名支持 a/b/c 层级：按 / 拆段，从 baseParent 起逐级查找或创建，返回最深层级文件夹（全空段返回 nil）
+  @discardableResult
+  func findOrCreateFolderPath(_ path: String, baseParentId: String?) -> Folder? {
+    var parentId = baseParentId
+    var current: Folder? = nil
+    for seg in path.split(separator: "/").map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }).filter({ !$0.isEmpty }) {
+      let f = findOrCreateFolder(name: seg, parentId: parentId)
+      current = f
+      parentId = f.id
+    }
+    return current
+  }
+
   func renameFolder(_ id: String, _ name: String) {
     mutate { d in
       d.folders = d.folders.map { f in

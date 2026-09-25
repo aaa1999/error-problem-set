@@ -5,7 +5,7 @@
 
 ## 前提
 
-- 手机（iOS）和电脑（桌面端）都连到同一台同步服务器（`backend/sync_server.py`，默认端口 8081），
+- 手机（iOS / Android）和电脑（桌面端）都连到同一台同步服务器（`backend/sync_server.py`，默认端口 8081），
   部署与地址填写见 [sync-protocol.md](./sync-protocol.md) 与 [../backend/README.md](../backend/README.md)
 - 两端 app 均为 v0.8 及以上（支持做题 tab 与待导入清单）
 

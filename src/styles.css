@@ -118,6 +118,119 @@ body {
   font-weight: 600;
 }
 
+/* 录入 tab 分组按钮：主按钮 = 普通录入，▾ = 入口菜单（文件夹/标签录入） */
+.tab-split {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 999px;
+}
+
+.tab-split > button {
+  border: none;
+  background: transparent;
+  padding: 6px 10px;
+  font-size: 13.5px;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.tab-split .tab-part-main {
+  border-radius: 999px 0 0 999px;
+  padding-right: 4px;
+}
+
+.tab-split .tab-part-caret {
+  border-radius: 0 999px 999px 0;
+  padding-left: 4px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.tab-split:hover > button {
+  background: #f1efe9;
+}
+
+.tab-split.active > button {
+  background: var(--accent-weak);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 录入入口菜单：贴合内容宽度 */
+.entry-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  min-width: 0;
+}
+
+.entry-menu button {
+  border: none;
+  background: none;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-family: inherit;
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.entry-menu button:hover {
+  background: #f4f2ec;
+}
+
+.entry-menu .muted {
+  font-size: 11.5px;
+}
+
+/* 右键菜单（笔记列表等）：光标处弹出，单行操作 */
+.ctx-menu {
+  position: fixed;
+  z-index: 60;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  padding: 5px;
+  min-width: 150px;
+}
+
+.ctx-menu button {
+  border: none;
+  background: none;
+  text-align: left;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--ink);
+}
+
+.ctx-menu button:hover {
+  background: #f4f2ec;
+}
+
+.ctx-menu button.danger {
+  color: var(--danger);
+}
+
 .topbar-right {
   margin-left: auto;
   display: flex;
@@ -423,6 +536,99 @@ kbd {
   white-space: nowrap;
 }
 
+/* 题号总览：进度字样本身可点，展开当前筛选下的全部题号 */
+.num-overview-btn {
+  border: none;
+  background: none;
+  padding: 3px 8px;
+  margin: -3px -8px;
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.num-overview-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.num-overview {
+  width: min(560px, 92vw);
+}
+
+/* 题号总览：按导入日期分组，滚动容器在分组层，日期标题吸顶 */
+.num-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 56vh;
+  overflow: auto;
+  padding: 2px;
+}
+
+.num-day {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 2px 4px;
+  background: var(--card);
+}
+
+.num-day-date {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.num-day-count {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+.num-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+  gap: 6px;
+}
+
+.num-cell {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 7px 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--ink);
+}
+
+.num-cell:hover {
+  border-color: var(--accent);
+}
+
+.num-cell.bad {
+  background: rgba(198, 40, 40, 0.1);
+  color: #c62828;
+  border-color: rgba(198, 40, 40, 0.25);
+}
+
+.num-cell.good {
+  background: rgba(46, 125, 50, 0.1);
+  color: #2e7d32;
+  border-color: rgba(46, 125, 50, 0.25);
+}
+
+.num-cell.cur {
+  box-shadow: 0 0 0 2px var(--accent);
+  font-weight: 700;
+}
+
 .page-a {
   margin-top: 28px;
   position: relative;
@@ -465,6 +671,12 @@ kbd {
   justify-content: space-between;
   margin-top: 14px;
   gap: 12px;
+}
+
+/* 底栏操作按钮（复制/编辑/移动/删除）固定同一行：窄窗口时宁可提示文字换行，也不把按钮挤下去 */
+.browse-foot .row-actions {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 /* 排列方式切换（时间/随机）：紧凑分段按钮 */
@@ -536,10 +748,70 @@ kbd {
 .entry-head h2 {
   margin: 0;
   font-size: 19px;
+  line-height: 1.2;
+  /* 标题与「· 普通录入」模式小字按垂直中心对齐，再与右侧按钮对齐 */
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .block-editor {
   margin-bottom: 16px;
+}
+
+/* 选项条：与题目/解析编辑器同款卡片视觉，一行收纳 标签+字母+加减 */
+.options-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 8px 14px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.options-bar .page-label {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.options-acts {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.opt-act {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-family: inherit;
+}
+
+.opt-act:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 录入页底栏：只留保存按钮，右对齐 */
+.entry-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .be-toolbar {
@@ -927,6 +1199,11 @@ kbd {
   cursor: grabbing;
 }
 
+/* 未分类：与「已分类」平级的兄弟节点——和上面的文件夹树拉开间距，不再混在文件夹堆里 */
+.side-uncat {
+  margin-top: 8px;
+}
+
 /* ---------- 录入：选择题选项编辑器 ---------- */
 .options-editor {
   margin-top: 14px;
@@ -939,22 +1216,30 @@ kbd {
   margin-bottom: 0;
 }
 
-.option-row {
+/* 选项字母行：独立圆钮（无输入框），点击标记正确答案 */
+.option-flow {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.option-content-note {
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-all;
+  margin: -8px 0 12px;
 }
 
 /* A/B/C/D 字母徽章：点击即选中为正确答案（实心高亮） */
 .option-letter-btn {
   flex-shrink: 0;
-  width: 26px;
-  height: 26px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   border: 1.5px solid var(--line);
   background: var(--card);
   font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted);
   cursor: pointer;
   padding: 0;
@@ -969,11 +1254,6 @@ kbd {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
-}
-
-.option-input {
-  flex: 1;
-  padding: 6px 10px;
 }
 
 /* ---------- 浏览：选择题作答 ---------- */
@@ -1078,6 +1358,12 @@ kbd {
 .tag-chip.reset-chip {
   border-style: dashed;
   color: #c62828;
+}
+
+/* 标签行里的所属文件夹 chip：淡灰色与标签区分，悬停显示完整路径 */
+.tag-chip.folder-chip {
+  background: #f1efe9;
+  color: var(--muted);
 }
 
 /* 复制菜单：点「复制 ▾」向上弹出两个选项（只复制题目 / 复制全部） */
@@ -1410,7 +1696,8 @@ kbd {
   flex-shrink: 0;
 }
 
-.side-item:hover .folder-acts {
+.side-item:hover .folder-acts,
+.side-tag:hover .folder-acts {
   display: flex;
 }
 
@@ -1441,6 +1728,31 @@ kbd {
   font-size: 13px;
   color: var(--ink);
   font-family: inherit;
+}
+
+/* 录入页：入口模式提示 */
+.entry-mode {
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.entry-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* 弹层快溢出窗口右缘时右对齐展开（JS 检测按钮位置后挂上） */
+.folder-pop.pop-right {
+  left: auto;
+  right: 0;
 }
 
 .side-tag:hover {
@@ -1720,6 +2032,17 @@ kbd {
   overflow: auto;
 }
 
+.folder-pop-create {
+  display: flex;
+  gap: 6px;
+  padding: 4px 2px 6px;
+}
+
+.folder-pop-create .modal-input {
+  flex: 1;
+  min-width: 0;
+}
+
 .folder-pop-row {
   display: flex;
   align-items: center;
@@ -1762,12 +2085,12 @@ kbd {
   gap: 10px;
   align-items: center;
   margin-bottom: 14px;
-  flex-wrap: wrap;
 }
 
+/* 标签输入与文件夹下拉固定同一行：允许收缩，超长内部滚动而不是换行 */
 .entry-meta .tag-input {
   flex: 1;
-  min-width: 260px;
+  min-width: 0;
   margin-bottom: 0;
 }
 
@@ -1797,6 +2120,7 @@ kbd {
 
 .notes-side-head {
   display: flex;
+  flex-wrap: wrap; /* 窄的时候按钮整个换行，而不是按钮里的文字折行 */
   gap: 8px;
   padding: 12px;
   border-bottom: 1px solid var(--line);
@@ -1804,6 +2128,7 @@ kbd {
 
 .notes-side-head .btn {
   flex: 1;
+  white-space: nowrap;
 }
 
 .notes-search-wrap {

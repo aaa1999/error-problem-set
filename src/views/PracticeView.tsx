@@ -38,7 +38,7 @@ export function PracticeView({
   session: PracticeSession | null;
   setSession: (s: PracticeSession | null) => void;
 }) {
-  const { db, addMistake, findOrCreateFolder, removePendingImport } = useBook();
+  const { db, addMistake, findOrCreateFolderPath, removePendingImport } = useBook();
 
   // ---------- 设置 ----------
   const [folderName, setFolderName] = useState(session?.folderName ?? localStorage.getItem(FOLDER_KEY) ?? "");
@@ -130,7 +130,7 @@ export function PracticeView({
 
   const importOne = async (i: number) => {
     if (!session) return;
-    const folder = session.folderName ? await findOrCreateFolder(session.folderName, null) : null;
+    const folder = session.folderName ? await findOrCreateFolderPath(session.folderName, null) : null;
     const m: Mistake = {
       id: uuid(),
       folderIds: folder ? [folder.id] : [],
@@ -172,7 +172,7 @@ export function PracticeView({
   const importPending = async (p: PendingImport) => {
     setBusyPending(p.id);
     try {
-      const folder = p.folderName ? await findOrCreateFolder(p.folderName, null) : null;
+      const folder = p.folderName ? await findOrCreateFolderPath(p.folderName, null) : null;
       for (const e of p.entries) {
         await addMistake({
           id: uuid(),
@@ -229,11 +229,7 @@ export function PracticeView({
         <>
         <div className="page-card" style={{ maxWidth: 560 }}>
           <div className="page-label">做题设置</div>
-          <p className="muted">
-            外部刷题的答题卡：选好题数逐题选 A/B/C/D，做完输入正确答案比对；
-            答错的和你标记「值得导入」的题可以一键导入错题本（在所选文件夹生成条目，之后补题目内容和图）。
-          </p>
-          <label className="field-label">文件夹名（导入时按名称查找，没有会自动创建；留空 = 未分类）</label>
+          <label className="field-label">文件夹名</label>
           <input
             className="modal-input"
             value={folderName}

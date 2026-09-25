@@ -4,7 +4,7 @@ import type { ImageBlock, Mistake } from "../types";
 import { descendantSet, folderPathName } from "../lib/folders";
 import { DND_MISTAKE } from "../lib/dnd";
 import { copyMistake } from "../lib/copy";
-import { isBlocksEmpty, newShuffleSeed, seededShuffle } from "../lib/utils";
+import { isBlocksEmpty, newShuffleSeed, seededShuffle, formatDay, formatTime } from "../lib/utils";
 import { useBook } from "../store";
 import { BlockView } from "../components/BlockView";
 import { Lightbox } from "../components/Lightbox";
@@ -28,11 +28,15 @@ function optionRate(m: Mistake): number {
 export function BrowseView({
   onEdit,
   onNew,
+  onNewInFolder,
+  onNewWithTag,
   selected,
   onSelect,
 }: {
   onEdit: (id: string) => void;
   onNew: () => void;
+  onNewInFolder: (folderId: string) => void;
+  onNewWithTag: (tag: string) => void;
   selected: string;
   onSelect: (s: string) => void;
 }) {
@@ -49,14 +53,20 @@ export function BrowseView({
   const [tagDraft, setTagDraft] = useState("");
   const [order, setOrder] = useState<BrowseOrder>(loadOrder);
   const [seed, setSeed] = useState(newShuffleSeed);
+  // 题号总览：当前筛选（文件夹 + 标签）下的全部题展开成题号网格，点题号跳题
+  const [numOpen, setNumOpen] = useState(false);
+  const curCellRef = useRef<HTMLButtonElement | null>(null);
   const touch = useRef<{ x: number; y: number } | null>(null);
 
-  // 文件夹范围（含子文件夹）；标签筛选叠加其上，两者同时生效
+  // 文件夹范围（含子文件夹）；"cat" = 已分类（至少属于一个文件夹）、"uncat" = 未分类；标签筛选叠加其上
   const inFolder = useMemo(() => {
     let arr = db.mistakes;
     if (selected === "uncat") {
       const ids = new Set(db.folders.map(f => f.id));
       arr = arr.filter(m => !m.folderIds.some(id => ids.has(id)));
+    } else if (selected === "cat") {
+      const ids = new Set(db.folders.map(f => f.id));
+      arr = arr.filter(m => m.folderIds.some(id => ids.has(id)));
     } else if (selected) {
       const set = descendantSet(db.folders, selected);
       arr = arr.filter(m => m.folderIds.some(id => set.has(id)));
@@ -91,7 +101,25 @@ export function BrowseView({
 
   const cur = list.length > 0 ? list[Math.min(index, list.length - 1)] : undefined;
 
-  const crumb = selected === "" ? "全部错题" : selected === "uncat" ? "未分类" : folderPathName(db.folders, selected);
+  // 题号总览按导入日期分组：组序跟随当前排列（时间排序下即由旧到新），同一天的题归到同组
+  const numGroups = useMemo(() => {
+    const groups: { day: string; items: { m: Mistake; i: number }[] }[] = [];
+    const byDay = new Map<string, (typeof groups)[number]>();
+    for (let i = 0; i < list.length; i++) {
+      const day = formatDay(list[i].createdAt);
+      let g = byDay.get(day);
+      if (!g) {
+        g = { day, items: [] };
+        byDay.set(day, g);
+        groups.push(g);
+      }
+      g.items.push({ m: list[i], i });
+    }
+    return groups;
+  }, [list]);
+
+  const crumb =
+    selected === "" ? "全部错题" : selected === "uncat" ? "未分类" : selected === "cat" ? "已分类" : folderPathName(db.folders, selected);
 
   const toggleTag = (t: string) =>
     setActiveTags(ts => (ts.includes(t) ? ts.filter(x => x !== t) : [...ts, t]));
@@ -160,6 +188,7 @@ export function BrowseView({
     setTagPopOpen(false);
     setCopyPopOpen(false);
     setPicked(null);
+    setNumOpen(false);
   }, [selected, activeTags, tagMode, order, seed]);
 
   useEffect(() => {
@@ -177,6 +206,22 @@ export function BrowseView({
     setCopyPopOpen(false);
     setPicked(null);
   };
+
+  // 题号总览里点题号直接跳到那道题（重置内容与 go 一致）
+  const jumpTo = (i: number) => {
+    if (i < 0 || i >= list.length) return;
+    setIndex(i);
+    setRevealed(false);
+    setTagPopOpen(false);
+    setCopyPopOpen(false);
+    setPicked(null);
+    setNumOpen(false);
+  };
+
+  // 打开题号总览时滚到当前题
+  useEffect(() => {
+    if (numOpen) curCellRef.current?.scrollIntoView({ block: "center" });
+  }, [numOpen]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -240,6 +285,8 @@ export function BrowseView({
       onToggleTagMode={() => setTagMode(m => (m === "and" ? "or" : "and"))}
       mistakesInFolder={inFolder}
       mistakesMatchingTags={mistakesMatchingTags}
+      onNewInFolder={onNewInFolder}
+      onNewWithTag={onNewWithTag}
     />
   );
 
@@ -251,21 +298,21 @@ export function BrowseView({
         title="按录入时间排列（旧 → 新）"
         onClick={() => applyOrder("time")}
       >
-        ⏱ 时间
+        时间
       </button>
       <button
         className={`seg ${order === "error" ? "on" : ""}`}
         title="按错误率从高到低（只显示录入时填了选项的题，优先复习错得多的）"
         onClick={() => applyOrder("error")}
       >
-        📊 错误率
+        错误率
       </button>
       <button
         className={`seg ${order === "random" ? "on" : ""}`}
         title={order === "random" ? "点击重新洗牌（换一批顺序）" : "随机排列，适合复习防背序"}
         onClick={() => (order === "random" ? reshuffle() : applyOrder("random"))}
       >
-        🔀 随机
+        随机
       </button>
     </span>
   );
@@ -348,7 +395,7 @@ export function BrowseView({
                     title="点击取消文件夹筛选（回到全部错题）"
                     onClick={() => onSelect("")}
                   >
-                    📁 {crumb} ✕
+                        {crumb} ✕
                   </button>
                 )}
                 {activeTags.map(t => (
@@ -370,7 +417,14 @@ export function BrowseView({
                 )}
               </div>
               <div className="browse-progress">
-                第 {index + 1} / {list.length} 题
+                <button
+                  type="button"
+                  className="num-overview-btn"
+                  title="题号总览：当前筛选（文件夹 / 标签）下的全部题按导入日期分组展开成题号，点题号跳题"
+                  onClick={() => setNumOpen(true)}
+                >
+                  ▦ 第 {index + 1} / {list.length} 题
+                </button>
               </div>
               <button className="icon-btn" onClick={() => go(1)} disabled={index === list.length - 1} title="下一题 (→)">
                 →
@@ -379,6 +433,21 @@ export function BrowseView({
 
             <div className="page-card">
               <div className="page-tags">
+                {cur.folderIds.length === 0 ? (
+                  <span className="tag-chip folder-chip" title="未分类：这道题不属于任何文件夹">
+                    未分类
+                  </span>
+                ) : (
+                  cur.folderIds.map(fid => {
+                    const f = db.folders.find(x => x.id === fid);
+                    if (!f) return null;
+                    return (
+                      <span key={fid} className="tag-chip folder-chip" title={`所属文件夹：${folderPathName(db.folders, fid)}`}>
+                        {f.name}
+                      </span>
+                    );
+                  })
+                )}
                 {cur.tags.map(t => (
                   <span key={t} className="tag-chip">
                     {t}
@@ -510,8 +579,7 @@ export function BrowseView({
                       : "已复制全部内容 ✓（含图片，可直接粘贴到 Word / 笔记）"
                     : "已复制 ✓（纯文本，此环境不支持带图复制）"
                   : <>
-                      <kbd>←</kbd> <kbd>→</kbd> 翻页 · <kbd>空格</kbd> 看解析 · <kbd>E</kbd> 编辑 · <kbd>N</kbd> 新增 ·
-                      拖题到侧栏文件夹归类（⌥ 追加所属）
+                      <kbd>←</kbd> <kbd>→</kbd> 翻页 · <kbd>空格</kbd> 看解析 · <kbd>E</kbd> 编辑 · <kbd>N</kbd> 新增
                     </>}
               </span>
               <div className="row-actions">
@@ -548,6 +616,40 @@ export function BrowseView({
         </div>
       </div>
       {lightbox && <Lightbox src={lightbox} onClose={() => setLightbox(null)} />}
+      {numOpen && (
+        <div className="modal-mask" onMouseDown={() => setNumOpen(false)}>
+          <div className="modal-card num-overview" onMouseDown={e => e.stopPropagation()}>
+            <h3>题号总览（{list.length} 题）</h3>
+            <div className="num-groups">
+              {numGroups.map(g => (
+                <section className="num-group" key={g.day}>
+                  <div className="num-day">
+                    <span className="num-day-date">{g.day}</span>
+                    <span className="num-day-count">{g.items.length} 题</span>
+                  </div>
+                  <div className="num-grid">
+                    {g.items.map(({ m, i }) => (
+                      <button
+                        type="button"
+                        key={m.id}
+                        ref={i === index ? curCellRef : undefined}
+                        className={`num-cell ${m.wrong > 0 ? "bad" : m.attempts > 0 ? "good" : ""} ${i === index ? "cur" : ""}`}
+                        title={`${formatTime(m.createdAt)} 导入；${m.wrong > 0 ? `错过 ${m.wrong} 次，点题号跳题` : m.attempts > 0 ? "作答全对" : "未作答 / 非选择题"}`}
+                        onClick={() => jumpTo(i)}
+                      >
+                        {i + 1}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+            <p className="muted">
+              按导入日期分组 · 红 = 错过 · 绿 = 作答全对 · 灰 = 未作答 / 非选择题；蓝框 = 当前题。点击题号跳转，范围随文件夹与标签筛选、排列方式变化。
+            </p>
+          </div>
+        </div>
+      )}
       {moveOpen && (
         <div className="modal-mask" onMouseDown={() => setMoveOpen(false)}>
           <div className="modal-card" onMouseDown={e => e.stopPropagation()}>

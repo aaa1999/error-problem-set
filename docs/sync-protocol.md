@@ -1,8 +1,8 @@
 # 错题本远程同步协议（v2）
 
-桌面端 / iOS 端「☁ 同步」功能使用的服务端接口规范。服务端只需实现下面 **5 个 HTTP 端点**，即可支持错题本的**推送**与**拉取**（错题、笔记、文件夹、预建标签与图片）。
+桌面端 / iOS 端 / Android 端「☁ 同步」功能使用的服务端接口规范。服务端只需实现下面 **5 个 HTTP 端点**，即可支持错题本的**推送**与**拉取**（错题、笔记、文件夹、预建标签与图片）。
 
-- 客户端实现：`src/lib/sync.ts`（桌面端）、`ios/ErrorBook/SyncEngine.swift`（iOS 端）
+- 客户端实现：`src/lib/sync.ts`（桌面端）、`ios/ErrorBook/SyncEngine.swift`（iOS 端）、`android/app/src/main/java/com/errorbook/android/SyncEngine.kt`（Android 端）
 - 协议版本：v1（错题本 v0.7.0，推送 3 端点）；v2（追加拉取 2 端点，向后兼容）
 
 ## 设计要点（为什么是这几个端点）

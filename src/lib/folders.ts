@@ -65,3 +65,9 @@ export function countUncategorized(mistakes: Mistake[], folders: Folder[]): numb
   const ids = new Set(folders.map(f => f.id));
   return mistakes.reduce((n, m) => (!m.folderIds.some(fid => ids.has(fid)) ? n + 1 : n), 0);
 }
+
+/** 已分类 = 至少属于一个（仍存在的）文件夹，与未分类互补 */
+export function countCategorized(mistakes: Mistake[], folders: Folder[]): number {
+  const ids = new Set(folders.map(f => f.id));
+  return mistakes.reduce((n, m) => (m.folderIds.some(fid => ids.has(fid)) ? n + 1 : n), 0);
+}

@@ -183,7 +183,7 @@ export function BlockEditor({ label, blocks, onChange, placeholder, autoFocus = 
         <input
           className="be-path"
           value={pathDraft}
-          placeholder="图片路径（可多个，逗号/换行分隔），回车导入"
+          placeholder="图片路径，回车导入"
           onChange={e => setPathDraft(e.target.value)}
           onKeyDown={e => {
             if (e.key === "Enter") {

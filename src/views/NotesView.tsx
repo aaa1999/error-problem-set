@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import type { Note } from "../types";
 import { formatTime, uuid } from "../lib/utils";
 import { noteExcerpt } from "../lib/markdown";
@@ -12,10 +13,12 @@ function newDraft(format: Note["format"]): Note {
 }
 
 export function NotesView() {
-  const { db } = useBook();
+  const { db, deleteNote } = useBook();
   const [sel, setSel] = useState<string | null>(null);
   const [draft, setDraft] = useState<Note | null>(null);
   const [query, setQuery] = useState("");
+  // 右键菜单：笔记列表项上右键（x/y 为光标位置）
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; noteId: string } | null>(null);
 
   const notes = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -45,8 +48,19 @@ export function NotesView() {
     setSel(null);
   };
 
+  const removeNote = async (n: Note) => {
+    setCtxMenu(null);
+    const ok = await ask(`确定删除笔记「${n.title.trim() || "无标题"}」吗？（旧数据在数据目录的 snapshots 里还有备份）`, {
+      title: "删除确认",
+    });
+    if (!ok) return;
+    await deleteNote(n.id);
+    if (sel === n.id) backToList();
+  };
+
   return (
-    <div className="notes-layout">
+    <>
+      <div className="notes-layout">
       <aside className="notes-side">
         <div className="notes-side-head">
           <button className="btn btn-sm" onClick={() => create("markdown")}>
@@ -71,7 +85,15 @@ export function NotesView() {
             </div>
           ) : (
             notes.map(n => (
-              <button key={n.id} className={`note-item ${selected?.id === n.id ? "active" : ""}`} onClick={() => pick(n.id)}>
+              <button
+                key={n.id}
+                className={`note-item ${selected?.id === n.id ? "active" : ""}`}
+                onClick={() => pick(n.id)}
+                onContextMenu={e => {
+                  e.preventDefault();
+                  setCtxMenu({ x: e.clientX, y: e.clientY, noteId: n.id });
+                }}
+              >
                 <span className="note-item-top">
                   <span className={`note-badge ${n.format === "word" ? "word" : "md"}`}>{n.format === "word" ? "Word" : "MD"}</span>
                   <span>{formatTime(n.updatedAt)}</span>
@@ -100,6 +122,38 @@ export function NotesView() {
           </div>
         )}
       </section>
-    </div>
+      </div>
+      {/* 笔记右键菜单：删除 */}
+      {ctxMenu && (
+        <>
+          <div
+            className="popover-backdrop"
+            onClick={() => setCtxMenu(null)}
+            onContextMenu={e => {
+              e.preventDefault();
+              setCtxMenu(null);
+            }}
+          />
+          <div
+            className="ctx-menu"
+            style={{
+              left: Math.min(ctxMenu.x, window.innerWidth - 170),
+              top: Math.min(ctxMenu.y, window.innerHeight - 64),
+            }}
+          >
+            <button
+              className="danger"
+              onClick={() => {
+                const n = db.notes.find(x => x.id === ctxMenu.noteId);
+                if (n) void removeNote(n);
+                else setCtxMenu(null);
+              }}
+            >
+              🗑 删除笔记
+            </button>
+          </div>
+        </>
+      )}
+    </>
   );
 }
