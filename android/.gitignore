@@ -1,0 +1,13 @@
+*.iml
+.gradle/
+build/
+local.properties
+.idea/
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 签名密钥（个人自用，勿提交）
+errorbook.keystore
+keystore.properties
