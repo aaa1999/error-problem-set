@@ -57,15 +57,16 @@ npm run tauri build  # 打包安装包（macOS .app/.dmg、Windows .msi/.exe、L
 - **导出**：任意笔记可导出 **PDF**（A4 分页排版）或 **Word 文档**（.doc，图片内嵌，Word/WPS 直接打开）
 - **自动保存**：停止输入约 1 秒自动落盘，`Ctrl/⌘ + S` 立即保存；切走时自动补存，空的新笔记不落盘直接丢弃
 
-## 远程同步（v0.7 推送 / v0.8 拉取）
+## 远程同步（v0.7 推送 / v0.8 拉取 / v0.9 多设备）
 
-顶栏「☁ 同步」，推送与拉取两个方向（填 `ip:端口`，可选「记住此地址」，随时改填新的）：
+顶栏「☁ 同步」，推送与按设备拉取两个方向（填 `ip:端口`，可选「记住此地址」，随时改填新的）：
 
 - **增量传输**：图片按内容哈希命名，只传/只下缺的；`data.json` 整份传输，几 KB 秒传
 - **幂等可续传**：中断后重新同步，已传/已下的自动跳过；可随时重复执行
-- **拉取合并**：换新设备恢复、多端互相同步——先「检查并预览」差量（将新增几道错题/笔记/文件夹/标签），确认后合并入库；**只增不删**，不覆盖本地任何数据
+- **多设备互不干扰**：每台设备（桌面 / iPhone / Android）在服务端各有自己的槽位，推送只覆盖**本设备**的版本；设备标识重装 App 也不变，槽位始终对得上
+- **按设备拉取，不合并**：一键把服务端上全部设备的数据各自拉到本地 `devices/` 目录，浏览时按 **设备 → 文件夹** 只读查看（可复制），本机数据不动；想把某台设备的数据并入本机库，用「合并导入」选它的目录（只增不删）
 - 支持可选访问令牌（`X-Sync-Token`）；传输中显示逐张进度，可中止
-- 服务端只需 5 个 HTTP 端点，接口文档（含 curl 示例）见 **[docs/sync-protocol.md](./docs/sync-protocol.md)**；仓库自带零依赖 Python 实现 **[backend/sync_server.py](./backend/sync_server.py)**（部署说明见 [backend/README.md](./backend/README.md)），一条命令即可起服务
+- 服务端只需 7 个 HTTP 端点，接口文档（含 curl 示例）见 **[docs/sync-protocol.md](./docs/sync-protocol.md)**；仓库自带零依赖 Python 实现 **[backend/sync_server.py](./backend/sync_server.py)**（部署说明见 [backend/README.md](./backend/README.md)），一条命令即可起服务
 
 ## 快捷键（浏览模式）
 
@@ -86,7 +87,8 @@ npm run tauri build  # 打包安装包（macOS .app/.dmg、Windows .msi/.exe、L
 数据目录/
 ├── data.json      # 全部错题与笔记（文字内容 + 图片引用）
 ├── assets/        # 图片文件，按内容哈希命名，自动去重（错题与笔记共用）
-└── snapshots/     # data.json 的历史快照，保留最近 20 份
+├── snapshots/     # data.json 的历史快照，保留最近 20 份
+└── devices/       # 「按设备拉取」下来的其他设备数据，每台设备一个子目录（只读浏览）
 ```
 
 - **备份 = 拷贝整个文件夹**；放进 iCloud/OneDrive 等同步盘即可多设备共用

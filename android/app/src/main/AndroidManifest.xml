@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 远程同步（推送 / 按设备拉取）必需；v0.8.2 漏声明导致所有请求 EACCES (Permission denied) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:name=".ErrorBookApp"
         android:allowBackup="true"

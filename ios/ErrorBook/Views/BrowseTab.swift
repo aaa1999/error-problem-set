@@ -35,9 +35,18 @@ struct BrowseTab: View {
   @State private var tagEntrySel: [String] = []
   @State private var entryPreset: EntryPreset?
 
+  // 远程设备范围（「☁ 同步 → 按设备拉取」后可浏览）：nil = 本机；设备范围只读
+  @State private var deviceScope: String?
+  private var remote: RemoteDevice? {
+    guard let id = deviceScope else { return nil }
+    return store.remoteDevices.first { $0.id == id }
+  }
+  private var activeDb: Database { remote?.db ?? store.db }
+  private var readOnly: Bool { remote != nil }
+
   private var list: [Mistake] {
-    var arr = store.db.mistakes
-    let folders = store.db.folders
+    var arr = activeDb.mistakes
+    let folders = activeDb.folders
     if selectedFolder == "uncat" {
       let ids = Set(folders.map { $0.id })
       arr = arr.filter { m in !m.folderIds.contains { ids.contains($0) } }
@@ -49,7 +58,7 @@ struct BrowseTab: View {
       let set = descendantSet(folders, selectedFolder)
       arr = arr.filter { m in m.folderIds.contains { set.contains($0) } }
     }
-    if !activeTags.isEmpty {
+    if !activeTags.isEmpty && !readOnly {
       arr = arr.filter { m in
         tagModeAnd ? activeTags.allSatisfy { m.tags.contains($0) } : activeTags.contains { m.tags.contains($0) }
       }
@@ -76,10 +85,13 @@ struct BrowseTab: View {
   }
 
   private var crumb: String {
-    if selectedFolder.isEmpty { return "全部错题" }
-    if selectedFolder == "uncat" { return "未分类" }
-    if selectedFolder == "cat" { return "已分类" }
-    return folderPathName(store.db.folders, selectedFolder)
+    let base: String
+    if selectedFolder.isEmpty { base = "全部错题" }
+    else if selectedFolder == "uncat" { base = "未分类" }
+    else if selectedFolder == "cat" { base = "已分类" }
+    else { base = folderPathName(activeDb.folders, selectedFolder) }
+    if let remote { return "\(remote.name) · \(base)" }
+    return base
   }
 
   var body: some View {
@@ -144,6 +156,13 @@ struct BrowseTab: View {
       }
     }
     .onChange(of: selectedFolder) { _ in index = 0; revealed = false }
+    .onChange(of: deviceScope) { _ in
+      // 切设备即切数据源：清掉文件夹/标签筛选，回到该设备的全部错题
+      selectedFolder = ""
+      activeTags = []
+      index = 0
+      revealed = false
+    }
     .onReceive(NotificationCenter.default.publisher(for: .errorbookMoveRequest)) { note in
       // 卡片菜单里的「移动到文件夹」→ 打开本视图的移动面板
       if let id = note.object as? String, current?.id == id {
@@ -166,15 +185,17 @@ struct BrowseTab: View {
 
   private var emptyState: some View {
     EmptyStateView(
-      icon: store.db.mistakes.isEmpty ? "books.vertical" : "line.3.horizontal.decrease.circle",
-      title: store.db.mistakes.isEmpty ? "还没有错题" : "当前条件下没有错题",
-      message: store.db.mistakes.isEmpty
-        ? "先录入第一道题，或把攒了一堆的截图批量导入进来。"
+      icon: activeDb.mistakes.isEmpty ? (readOnly ? "iphone" : "books.vertical") : "line.3.horizontal.decrease.circle",
+      title: activeDb.mistakes.isEmpty ? (readOnly ? "该设备还没有错题" : "还没有错题") : "当前条件下没有错题",
+      message: activeDb.mistakes.isEmpty
+        ? readOnly
+          ? "\(remote?.name ?? "该设备") 推送到服务端的库是空的。"
+          : "先录入第一道题，或把攒了一堆的截图批量导入进来。"
         : orderRaw == "error"
           ? "没有带选项的错题——错误率排序只统计录入时填了选项并标记了正确答案的题；也可换文件夹或标签筛选条件试试。"
           : "换个文件夹或标签筛选条件试试。",
-      actionTitle: store.db.mistakes.isEmpty ? "＋ 录入错题" : "清除筛选",
-      action: store.db.mistakes.isEmpty ? { entryNew = true } : {
+      actionTitle: activeDb.mistakes.isEmpty && !readOnly ? "＋ 录入错题" : "清除筛选",
+      action: activeDb.mistakes.isEmpty && !readOnly ? { entryNew = true } : {
         selectedFolder = ""
         activeTags = []
       }
@@ -187,17 +208,17 @@ struct BrowseTab: View {
     HStack(spacing: 10) {
       Menu {
         Button("全部错题") { selectedFolder = "" }
-        Button("已分类（\(countCategorized(store.db.mistakes, store.db.folders))）") { selectedFolder = "cat" }
-        Button("未分类（\(countUncategorized(store.db.mistakes, store.db.folders))）") { selectedFolder = "uncat" }
+        Button("已分类（\(countCategorized(activeDb.mistakes, activeDb.folders))）") { selectedFolder = "cat" }
+        Button("未分类（\(countUncategorized(activeDb.mistakes, activeDb.folders))）") { selectedFolder = "uncat" }
         Divider()
-        ForEach(flatFolders(store.db.folders), id: \.folder.id) { item in
+        ForEach(flatFolders(activeDb.folders), id: \.folder.id) { item in
           Button {
             selectedFolder = item.folder.id
           } label: {
             HStack {
               Text(String(repeating: "　", count: item.depth) + item.folder.name)
               Spacer()
-              Text("\(countInFolder(store.db.mistakes, store.db.folders, item.folder.id))").foregroundStyle(.secondary)
+              Text("\(countInFolder(activeDb.mistakes, activeDb.folders, item.folder.id))").foregroundStyle(.secondary)
             }
           }
         }
@@ -215,7 +236,7 @@ struct BrowseTab: View {
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 6) {
             if !selectedFolder.isEmpty {
-              TagChip(text: selectedFolder == "uncat" ? "未分类" : folderPathName(store.db.folders, selectedFolder)) {
+              TagChip(text: selectedFolder == "uncat" ? "未分类" : folderPathName(activeDb.folders, selectedFolder)) {
                 selectedFolder = ""
               }
             }
@@ -245,6 +266,13 @@ struct BrowseTab: View {
           .font(.caption)
           .buttonStyle(.bordered)
         }
+      } else if readOnly {
+        // 远程设备：标签属各设备库，本机标签菜单不适用
+        Spacer()
+        Text("📱 \(remote?.name ?? "") 只读")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Spacer()
       } else {
         Spacer()
         Menu {
@@ -325,7 +353,9 @@ struct BrowseTab: View {
           onReveal: { revealed = true },
           onImageTap: { url in lightbox = url },
           onEdit: { entryTarget = m },
-          onTagEdit: { tagSheetFor = m }
+          onTagEdit: { tagSheetFor = m },
+          foldersOverride: activeDb.folders,
+          readOnly: readOnly
         )
         .tag(idx)
         .padding(.horizontal, 8)
@@ -378,21 +408,42 @@ struct BrowseTab: View {
   @ToolbarContentBuilder
   private var toolbarContent: some ToolbarContent {
     ToolbarItemGroup(placement: .topBarTrailing) {
-      // 录入三入口：普通 / 文件夹 / 标签
-      Menu {
-        Button { entryNew = true } label: { Label("普通录入", systemImage: "square.and.pencil") }
-        Button {
-          folderEntrySel = []
-          folderEntryOpen = true
-        } label: { Label("文件夹录入", systemImage: "folder.badge.plus") }
-        Button {
-          tagEntrySel = []
-          tagEntryOpen = true
-        } label: { Label("标签录入", systemImage: "tag.badge.plus") }
-        Divider()
-        Button { batchOpen = true } label: { Label("批量导入截图", systemImage: "photo.on.rectangle.angled") }
-      } label: {
-        Label("添加", systemImage: "plus")
+      // 设备切换：本机 + 已拉取的远程设备（只读浏览）
+      if !store.remoteDevices.isEmpty {
+        Menu {
+          Button {
+            deviceScope = nil
+          } label: {
+            Label("本机", systemImage: readOnly ? "iphone" : "checkmark")
+          }
+          ForEach(store.remoteDevices) { d in
+            Button {
+              deviceScope = d.id
+            } label: {
+              Label(d.name, systemImage: deviceScope == d.id ? "checkmark" : "iphone")
+            }
+          }
+        } label: {
+          Label(readOnly ? (remote?.name ?? "设备") : "本机", systemImage: "arrow.up.arrow.down.circle")
+        }
+      }
+      if !readOnly {
+        // 录入三入口：普通 / 文件夹 / 标签
+        Menu {
+          Button { entryNew = true } label: { Label("普通录入", systemImage: "square.and.pencil") }
+          Button {
+            folderEntrySel = []
+            folderEntryOpen = true
+          } label: { Label("文件夹录入", systemImage: "folder.badge.plus") }
+          Button {
+            tagEntrySel = []
+            tagEntryOpen = true
+          } label: { Label("标签录入", systemImage: "tag.badge.plus") }
+          Divider()
+          Button { batchOpen = true } label: { Label("批量导入截图", systemImage: "photo.on.rectangle.angled") }
+        } label: {
+          Label("添加", systemImage: "plus")
+        }
       }
       Button { syncOpen = true } label: { Label("同步", systemImage: "icloud.and.arrow.up") }
     }
@@ -674,6 +725,10 @@ struct MistakeCardView: View {
   let onImageTap: (URL) -> Void
   let onEdit: () -> Void
   let onTagEdit: () -> Void
+  /** 数据源文件夹（浏览远程设备时传该设备的；nil = 本机 store.db） */
+  var foldersOverride: [Folder]? = nil
+  /** 远程设备只读：隐藏编辑/标签/移动/删除，作答禁用，复制可用 */
+  var readOnly = false
 
   @State private var confirmDelete = false
   // 一键复制整道题的短暂反馈
@@ -681,6 +736,7 @@ struct MistakeCardView: View {
   // 选择题作答：本次浏览内每题只作答一次，答完自动看解析并累计统计（落盘）
   @State private var picked: Int?
 
+  private var folders: [Folder] { foldersOverride ?? store.db.folders }
   private var analysisEmpty: Bool { isBlocksEmpty(mistake.analysis) }
 
   var body: some View {
@@ -701,7 +757,9 @@ struct MistakeCardView: View {
           if analysisEmpty {
             HStack {
               Text("这道题还没有解析").font(.subheadline).foregroundStyle(.secondary)
-              Button("去补解析", action: onEdit).font(.subheadline)
+              if !readOnly {
+                Button("去补解析", action: onEdit).font(.subheadline)
+              }
             }
           } else {
             BlockListView(blocks: mistake.analysis, onImageTap: onImageTap)
@@ -728,7 +786,7 @@ struct MistakeCardView: View {
           Spacer()
           Menu {
             Button {
-              copyMistakeToPasteboard(mistake, folders: store.db.folders, dataDir: store.dataDir, questionOnly: true)
+              copyMistakeToPasteboard(mistake, folders: folders, dataDir: store.dataDir, questionOnly: true)
               copiedFlash = true
               Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 1_600_000_000)
@@ -738,7 +796,7 @@ struct MistakeCardView: View {
               Label("只复制题目（含图片）", systemImage: "doc.on.doc")
             }
             Button {
-              copyMistakeToPasteboard(mistake, folders: store.db.folders, dataDir: store.dataDir)
+              copyMistakeToPasteboard(mistake, folders: folders, dataDir: store.dataDir)
               copiedFlash = true
               Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 1_600_000_000)
@@ -747,11 +805,13 @@ struct MistakeCardView: View {
             } label: {
               Label("复制全部内容（题目、选项、解析…）", systemImage: "doc.on.doc.fill")
             }
-            Button(action: onEdit) { Label("编辑", systemImage: "pencil") }
-            Button(action: onTagEdit) { Label("标签", systemImage: "tag") }
-            Button { moveRequested() } label: { Label("调整所属文件夹", systemImage: "folder") }
-            Divider()
-            Button(role: .destructive) { confirmDelete = true } label: { Label("删除", systemImage: "trash") }
+            if !readOnly {
+              Button(action: onEdit) { Label("编辑", systemImage: "pencil") }
+              Button(action: onTagEdit) { Label("标签", systemImage: "tag") }
+              Button { moveRequested() } label: { Label("调整所属文件夹", systemImage: "folder") }
+              Divider()
+              Button(role: .destructive) { confirmDelete = true } label: { Label("删除", systemImage: "trash") }
+            }
           } label: {
             Image(systemName: "ellipsis.circle")
           }
@@ -774,7 +834,7 @@ struct MistakeCardView: View {
   // MARK: 选择题作答
 
   private func answerOption(_ i: Int) {
-    guard picked == nil, let ans = mistake.answer else { return }
+    guard !readOnly, picked == nil, let ans = mistake.answer else { return }
     picked = i
     onReveal() // 答完自动翻开解析
     let ok = i == ans
@@ -856,7 +916,7 @@ struct MistakeCardView: View {
         folderChip(name: "未分类")
       } else {
         ForEach(mistake.folderIds, id: \.self) { fid in
-          if let f = store.db.folders.first(where: { $0.id == fid }) {
+          if let f = folders.first(where: { $0.id == fid }) {
             folderChip(name: f.name)
           }
         }
@@ -864,15 +924,17 @@ struct MistakeCardView: View {
       ForEach(mistake.tags, id: \.self) { t in
         TagChip(text: t)
       }
-      Button(action: onTagEdit) {
-        Label("标签", systemImage: "plus")
-          .font(.caption)
-          .padding(.horizontal, 9)
-          .padding(.vertical, 4)
-          .background(Capsule().fill(Color(.systemGray5)))
-          .foregroundStyle(.secondary)
+      if !readOnly {
+        Button(action: onTagEdit) {
+          Label("标签", systemImage: "plus")
+            .font(.caption)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color(.systemGray5)))
+            .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
       }
-      .buttonStyle(.plain)
     }
   }
 

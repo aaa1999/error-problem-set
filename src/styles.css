@@ -2629,3 +2629,77 @@ kbd {
   margin: 16px 0;
 }
 
+
+/* ---------- 远程设备（按设备拉取，只读浏览） ---------- */
+
+/* 侧栏设备行：与文件夹行同骨架，但不可拖放/编辑 */
+.remote-device {
+  margin-bottom: 2px;
+}
+.side-item.device-row .folder-name {
+  font-weight: 600;
+}
+.side-item.device-row.active-parent {
+  background: transparent;
+  color: inherit;
+}
+.side-item.device-row.active-parent .count {
+  opacity: 1;
+}
+
+/* 笔记页设备切换药丸 */
+.device-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.device-pill {
+  border: 1px solid var(--border, #d8d2c4);
+  background: transparent;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+}
+.device-pill:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+.device-pill.on {
+  background: #4a7aa8;
+  border-color: #4a7aa8;
+  color: #fff;
+}
+
+/* 远程笔记只读查看 */
+.remote-note-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.note-viewer-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #e3dfd6;
+}
+.note-viewer-body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 20px;
+  line-height: 1.7;
+}
+.note-viewer-body img {
+  max-width: 100%;
+}
+.note-viewer-body table {
+  border-collapse: collapse;
+}
+.note-viewer-body th,
+.note-viewer-body td {
+  border: 1px solid #d8d2c4;
+  padding: 4px 8px;
+}

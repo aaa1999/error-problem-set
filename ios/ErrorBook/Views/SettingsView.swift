@@ -67,7 +67,7 @@ struct SettingsView: View {
           Button {
             syncOpen = true
           } label: {
-                Label("推送到自建服务器", systemImage: "icloud.and.arrow.up")
+                Label("同步（推送 / 按设备拉取）", systemImage: "icloud.and.arrow.up")
           }
           if let t = SyncStore.load() {
             LabeledContent("已记住", value: t.server)

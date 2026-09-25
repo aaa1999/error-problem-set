@@ -2,9 +2,10 @@ import type { Database, Folder, Mistake, Note, PendingImport } from "../types";
 import { collectAssetRefs } from "./markdown";
 
 /**
- * 数据合并核心（「合并导入」与「从远程拉取」共用）：
+ * 数据合并核心（「合并导入」使用）：
  * 幂等合并——错题/笔记按 id 去重、文件夹按「名称+父级」逐层合并、
  * 预建标签并入、图片按内容哈希只取本地缺的。可重复执行，已并入的自动跳过。
+ * 远程同步已改为按设备分开落盘、不合并（lib/sync.ts + lib/devices.ts）。
  */
 
 /** 差量计算：源库相对当前库会新增什么（纯函数，不动数据） */
@@ -150,7 +151,7 @@ export async function executeMerge(plan: MergePlan, io: MergeIO): Promise<MergeO
   };
 }
 
-/** 合并结果的统一文案（合并导入 / 远程拉取共用口径） */
+/** 合并结果的统一文案（合并导入用） */
 export function mergeOutcomeText(plan: MergePlan, o: MergeOutcome): string {
   const parts = [
     `新导入 ${o.newMistakes} 道错题、${o.newNotes} 篇笔记`,

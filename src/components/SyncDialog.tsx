@@ -1,26 +1,23 @@
 import { useRef, useState } from "react";
 import { useBook } from "../store";
-import { mergeOutcomeText, MergeAborted, type MergePlan } from "../lib/merge";
 import {
   SyncAborted,
   clearSyncTarget,
   collectLibraryAssets,
-  fetchRemotePlan,
   loadSyncTarget,
   normalizeServerAddr,
-  pullFromServer,
+  pullAllDevices,
   pushToServer,
   saveSyncTarget,
-  type PullOutcome,
   type PullProgress,
   type SyncProgress,
 } from "../lib/sync";
 
 type Mode = "push" | "pull";
 
-/** 顶栏「☁ 同步」弹窗：推送整库到自建服务端 / 从服务端拉取合并（v2 协议，两边都幂等可重入） */
+/** 顶栏「☁ 同步」弹窗：推送整库到本设备在服务端的槽位 / 按设备拉取全部设备数据（不合并），两边都幂等可重入 */
 export function SyncDialog({ onClose }: { onClose: () => void }) {
-  const { db, dataDir, findOrCreateFolder, addMistakes, addNotes, addTags, addPendingImports } = useBook();
+  const { db, dataDir, remoteDevices, refreshRemoteDevices } = useBook();
   const [mode, setMode] = useState<Mode>("push");
   const [saved] = useState(loadSyncTarget);
   const [addr, setAddr] = useState(saved?.server ?? "");
@@ -30,8 +27,6 @@ export function SyncDialog({ onClose }: { onClose: () => void }) {
   const [progress, setProgress] = useState<SyncProgress | PullProgress | null>(null);
   const [result, setResult] = useState("");
   const [err, setErr] = useState("");
-  // 拉取两步走：先取远端库算差量给用户确认，再执行合并
-  const [pullPlan, setPullPlan] = useState<MergePlan | null>(null);
   const abortRef = useRef(false);
 
   const assetCount = collectLibraryAssets(db).size;
@@ -56,7 +51,6 @@ export function SyncDialog({ onClose }: { onClose: () => void }) {
   const runPush = async () => {
     setErr("");
     setResult("");
-    setPullPlan(null);
     const server = resolveServer();
     if (!server) return;
     setBusy(true);
@@ -73,7 +67,7 @@ export function SyncDialog({ onClose }: { onClose: () => void }) {
       rememberTarget(server);
       const parts = [`上传图片 ${r.uploadedAssets}/${r.totalAssets} 张（其余服务器已有，跳过）`];
       if (r.missingLocal > 0) parts.push(`${r.missingLocal} 张本地文件缺失已跳过`);
-      setResult(`同步完成：${parts.join("，")}；${r.mistakes} 道错题、${r.notes} 篇笔记、${r.folders} 个文件夹已推送。`);
+      setResult(`同步完成：${parts.join("，")}；${r.mistakes} 道错题、${r.notes} 篇笔记、${r.folders} 个文件夹已推送到本设备的版本。`);
     } catch (e) {
       if (e instanceof SyncAborted) setErr(`已中止：本次已上传 ${e.uploaded} 张图片，重新同步会自动续传。`);
       else setErr(e instanceof Error ? e.message : String(e));
@@ -83,53 +77,39 @@ export function SyncDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
-  // ---------- 拉取 ----------
+  // ---------- 拉取（按设备，不合并） ----------
 
-  const runPullCheck = async () => {
+  const runPull = async () => {
     setErr("");
     setResult("");
-    setPullPlan(null);
     const server = resolveServer();
     if (!server) return;
     setBusy(true);
     abortRef.current = false;
     setProgress({ phase: "connect", done: 0, total: 0 });
     try {
-      const plan = await fetchRemotePlan({ server, token: token.trim() || undefined }, db);
-      setPullPlan(plan);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-      setProgress(null);
-    }
-  };
-
-  const pullNothingNew = (p: MergePlan) =>
-    p.newMistakes.length === 0 && p.newNotes.length === 0 && p.newTags.length === 0 && p.assetKeys.length === 0;
-
-  const runPullMerge = async () => {
-    if (!pullPlan) return;
-    setErr("");
-    setBusy(true);
-    abortRef.current = false;
-    try {
-      const server = resolveServer();
-      if (!server) return;
-      const r: PullOutcome = await pullFromServer(
+      const r = await pullAllDevices(
         { server, token: token.trim() || undefined },
         dataDir,
-        pullPlan,
-        { findOrCreateFolder, addMistakes, addNotes, addTags, addPendingImports },
         setProgress,
         () => abortRef.current,
       );
       rememberTarget(server);
-      setResult(`${mergeOutcomeText(pullPlan, r)}本次下载图片 ${r.downloadedAssets} 张。`);
-      setPullPlan(null);
+      await refreshRemoteDevices();
+      if (r.onlySelf) {
+        setResult("服务器上还没有其他设备的数据（本机自己的推送不会重复拉取）。");
+      } else {
+        const parts = r.pulled.map(d => `${d.name}（${d.mistakes} 题 / ${d.notes} 笔记）`);
+        const extras: string[] = [];
+        if (r.downloadedAssets > 0) extras.push(`下载图片 ${r.downloadedAssets} 张`);
+        if (r.missingAssets > 0) extras.push(`${r.missingAssets} 张图片服务端缺失已跳过`);
+        setResult(
+          `拉取完成：${r.pulled.length} 台设备已更新到本地（${parts.join("、")}）${extras.length > 0 ? `，${extras.join("，")}` : ""}。` +
+            `在侧栏「远程设备」里按 设备 → 文件夹 浏览；本机数据未做任何改动。`,
+        );
+      }
     } catch (e) {
-      // 中止只发生在图片下载间隙：已下载的保留（哈希命名），重新拉取自动续上
-      if (e instanceof MergeAborted) setErr(`已中止：已下载 ${e.fetched} 张图片，重新拉取会自动续上。`);
+      if (e instanceof SyncAborted) setErr(`已中止：重新拉取会自动续上（已下载的保留）。`);
       else setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -142,14 +122,13 @@ export function SyncDialog({ onClose }: { onClose: () => void }) {
     setMode(m);
     setErr("");
     setResult("");
-    setPullPlan(null);
     setProgress(null);
   };
 
   // ---------- 进度条与文案 ----------
 
   const pct = progress
-    ? ((progress.done + (progress.phase === "data" || progress.phase === "merge" ? 1 : 0)) /
+    ? ((progress.done + (progress.phase === "data" || progress.phase === "done" ? 1 : 0)) /
         Math.max(progress.total + 1, 1)) *
       100
     : 0;
@@ -157,14 +136,16 @@ export function SyncDialog({ onClose }: { onClose: () => void }) {
     ? progress.phase === "connect"
       ? mode === "push"
         ? "正在连接服务器、获取清单…"
-        : "正在连接服务器、拉取题库数据…"
-      : progress.phase === "assets"
-        ? mode === "push"
-          ? `正在上传图片 ${progress.done + 1}/${progress.total}（${progress.current?.slice(0, 16) ?? ""}…）`
-          : `正在下载图片 ${Math.min(progress.done + 1, progress.total)}/${progress.total}（${progress.current?.slice(0, 16) ?? ""}…）`
-        : mode === "push"
-          ? "正在推送题库数据（data.json）…"
-          : "正在并入本地库…"
+        : "正在连接服务器、获取设备清单…"
+      : progress.phase === "devices"
+        ? `正在拉取设备数据 ${Math.min(progress.done + 1, progress.total)}/${progress.total}（${progress.current ?? ""}…）`
+        : progress.phase === "assets"
+          ? mode === "push"
+            ? `正在上传图片 ${progress.done + 1}/${progress.total}（${progress.current?.slice(0, 16) ?? ""}…）`
+            : `正在下载图片 ${Math.min(progress.done + 1, progress.total)}/${progress.total}（${progress.current?.slice(0, 16) ?? ""}…）`
+          : mode === "push"
+            ? "正在推送题库数据（data.json）…"
+            : "拉取完成。"
     : "";
 
   return (
@@ -181,7 +162,7 @@ export function SyncDialog({ onClose }: { onClose: () => void }) {
             ⬆ 推送到远程
           </button>
           <button className={`tab ${mode === "pull" ? "active" : ""}`} disabled={busy} onClick={() => switchMode("pull")}>
-            ⬇ 从远程拉取
+            ⬇ 按设备拉取
           </button>
         </div>
         <label className="field-label">服务器地址（ip:端口）</label>
@@ -192,7 +173,7 @@ export function SyncDialog({ onClose }: { onClose: () => void }) {
           disabled={busy}
           onChange={e => setAddr(e.target.value)}
           onKeyDown={e => {
-            if (e.key === "Enter" && !busy) void (mode === "push" ? runPush() : runPullCheck());
+            if (e.key === "Enter" && !busy) void (mode === "push" ? runPush() : runPull());
           }}
         />
         <label className="field-label">访问令牌（可选，服务端未启用验证可留空）</label>
@@ -204,18 +185,13 @@ export function SyncDialog({ onClose }: { onClose: () => void }) {
 
         {mode === "push" ? (
           <p className="muted">
-            推送 {db.mistakes.length} 道错题、{db.notes.length} 篇笔记及引用的 {assetCount} 张图片；服务器已有的图片自动跳过，可随时重复同步。服务端接口说明见
-            docs/sync-protocol.md。
-          </p>
-        ) : pullPlan ? (
-          <p className="muted">
-            {pullNothingNew(pullPlan)
-              ? "服务器数据已全部在本地，无需合并。"
-              : `服务器上有 ${pullPlan.source.mistakes.length} 道错题、${pullPlan.source.notes.length} 篇笔记、${pullPlan.source.folders.length} 个文件夹：将合并新增 ${pullPlan.newMistakes.length} 道错题、${pullPlan.newNotes.length} 篇笔记、${pullPlan.newTags.length} 个标签（含 ${pullPlan.assetKeys.length} 张图片），其余本地已存在自动跳过。合并不会覆盖或删除本地任何数据。`}
+            推送 {db.mistakes.length} 道错题、{db.notes.length} 篇笔记及引用的 {assetCount} 张图片。推送只覆盖本设备在服务器上的版本，其他设备推送的数据不受影响。
           </p>
         ) : (
           <p className="muted">
-            拉取服务器上的整份题库并合并到本地：新增的错题/笔记/文件夹/标签并入，本地已有的自动跳过，缺的图片按内容哈希下载。换新设备恢复数据、或多端互相同步都用它，可随时重复执行。
+            拉取服务器上全部设备各自推送的整库，每台设备单独保存到本数据目录的 devices/
+            下，<b>不与本机数据合并</b>；之后在错题本侧栏「远程设备」里按 设备 → 文件夹 只读浏览、可复制。
+            {remoteDevices.length > 0 ? `（本地已有 ${remoteDevices.length} 台设备的快照，重新拉取即刷新）` : ""}
           </p>
         )}
 
@@ -235,68 +211,17 @@ export function SyncDialog({ onClose }: { onClose: () => void }) {
             <button className="btn" onClick={() => (abortRef.current = true)}>
               中止
             </button>
-          ) : mode === "push" ? (
-            result ? (
-              <>
-                <button className="btn" onClick={onClose}>
-                  完成
-                </button>
-                <button className="btn btn-primary" onClick={() => void runPush()}>
-                  再次同步
-                </button>
-              </>
-            ) : (
-              <>
-                <button className="btn" onClick={onClose}>
-                  取消
-                </button>
-                <button className="btn btn-primary" disabled={!addr.trim()} onClick={() => void runPush()}>
-                  开始同步
-                </button>
-              </>
-            )
-          ) : pullPlan ? (
-            pullNothingNew(pullPlan) ? (
-              <>
-                <button className="btn" onClick={onClose}>
-                  完成
-                </button>
-                <button className="btn btn-primary" onClick={() => void runPullCheck()}>
-                  重新检查
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  className="btn"
-                  onClick={() => {
-                    setPullPlan(null);
-                    setErr("");
-                  }}
-                >
-                  取消
-                </button>
-                <button className="btn btn-primary" onClick={() => void runPullMerge()}>
-                  开始合并
-                </button>
-              </>
-            )
-          ) : result ? (
-            <>
-              <button className="btn" onClick={onClose}>
-                完成
-              </button>
-              <button className="btn btn-primary" onClick={() => void runPullCheck()}>
-                再次拉取
-              </button>
-            </>
           ) : (
             <>
               <button className="btn" onClick={onClose}>
-                取消
+                {result ? "完成" : "取消"}
               </button>
-              <button className="btn btn-primary" disabled={!addr.trim()} onClick={() => void runPullCheck()}>
-                检查并预览
+              <button
+                className="btn btn-primary"
+                disabled={!addr.trim()}
+                onClick={() => void (mode === "push" ? runPush() : runPull())}
+              >
+                {result ? (mode === "push" ? "再次同步" : "再次拉取") : mode === "push" ? "开始同步" : "拉取全部设备"}
               </button>
             </>
           )}

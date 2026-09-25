@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -87,18 +88,29 @@ import kotlinx.coroutines.withContext
 fun NotesTab() {
     val store = LocalBookStore.current
     val db by store.db.collectAsState()
+    val remoteDevices by store.remoteDevices.collectAsState()
     var query by remember { mutableStateOf("") }
     var editorNoteId by remember { mutableStateOf<String?>(null) }
+    // 远程设备范围（「☁ 同步 → 按设备拉取」后可浏览）：null = 本机；设备范围只读
+    var deviceScope by remember { mutableStateOf<String?>(null) }
+    var remoteNote by remember { mutableStateOf<Note?>(null) }
+    val remote = remoteDevices.firstOrNull { it.id == deviceScope }
+    val activeNotes = remote?.db?.notes ?: db.notes
+    val readOnly = remote != null
 
-    val notes = remember(db, query) {
+    val notes = remember(activeNotes, query) {
         val q = query.trim().lowercase()
-        db.notes
+        activeNotes
             .filter { n -> q.isEmpty() || n.title.lowercase().contains(q) || n.content.lowercase().contains(q) }
             .sortedByDescending { it.updatedAt }
     }
 
     editorNoteId?.let { id ->
         NoteEditorView(noteId = id, onDismiss = { editorNoteId = null })
+        return
+    }
+    remoteNote?.let { n ->
+        RemoteNoteView(note = n, onDismiss = { remoteNote = null })
         return
     }
 
@@ -110,14 +122,43 @@ fun NotesTab() {
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
-                Text("笔记", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                IconButton(onClick = {
-                    val n = Note(title = "", format = NoteFormat.MARKDOWN, content = "")
-                    store.addNote(n)
-                    // 直接进入新建的笔记（内容为空切走会自动丢弃）
-                    editorNoteId = n.id
-                }) {
-                    Icon(Icons.Filled.Edit, contentDescription = "新建笔记")
+                Text(
+                    if (readOnly) "${remote?.name ?: ""} 笔记" else "笔记",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                // 设备切换：本机 + 已拉取的远程设备（只读浏览）
+                if (remoteDevices.isNotEmpty()) {
+                    var deviceMenu by remember { mutableStateOf(false) }
+                    Box {
+                        TextButton(onClick = { deviceMenu = true }) {
+                            Text(if (readOnly) remote?.name ?: "设备" else "本机", style = MaterialTheme.typography.labelMedium)
+                            Text(" ▾", style = MaterialTheme.typography.labelSmall)
+                        }
+                        DropdownMenu(expanded = deviceMenu, onDismissRequest = { deviceMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text(if (!readOnly) "✓ 本机" else "本机") },
+                                onClick = { deviceMenu = false; deviceScope = null },
+                            )
+                            remoteDevices.forEach { d ->
+                                DropdownMenuItem(
+                                    text = { Text(if (deviceScope == d.id) "✓ ${d.name}（只读）" else "${d.name}（只读）") },
+                                    onClick = { deviceMenu = false; deviceScope = d.id },
+                                )
+                            }
+                        }
+                    }
+                }
+                if (!readOnly) {
+                    IconButton(onClick = {
+                        val n = Note(title = "", format = NoteFormat.MARKDOWN, content = "")
+                        store.addNote(n)
+                        // 直接进入新建的笔记（内容为空切走会自动丢弃）
+                        editorNoteId = n.id
+                    }) {
+                        Icon(Icons.Filled.Edit, contentDescription = "新建笔记")
+                    }
                 }
             }
             OutlinedTextField(
@@ -130,46 +171,96 @@ fun NotesTab() {
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp),
             )
-            if (db.notes.isEmpty()) {
+            if (activeNotes.isEmpty()) {
                 EmptyState(
-                    icon = Icons.AutoMirrored.Filled.Notes,
-                    title = "笔记",
-                    message = "Markdown 笔记（即时预览、可插入图片），均支持导出 PDF / Word。\nWord 富文本笔记可查看，编辑请用桌面端。",
+                    icon = if (readOnly) Icons.Filled.PhoneAndroid else Icons.AutoMirrored.Filled.Notes,
+                    title = if (readOnly) "${remote?.name ?: "该设备"} 的笔记" else "笔记",
+                    message = if (readOnly) {
+                        "该设备还没有推送过笔记，或库是空的。"
+                    } else {
+                        "Markdown 笔记（即时预览、可插入图片），均支持导出 PDF / Word。\nWord 富文本笔记可查看，编辑请用桌面端。"
+                    },
                 )
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(notes, key = { it.id }) { n ->
-                        val dismissState = rememberSwipeToDismissBoxState(
-                            confirmValueChange = { v ->
-                                if (v == SwipeToDismissBoxValue.EndToStart) {
-                                    store.deleteNote(n.id)
-                                    true
-                                } else {
-                                    false
-                                }
-                            },
-                        )
-                        SwipeToDismissBox(
-                            state = dismissState,
-                            enableDismissFromStartToEnd = false,
-                            backgroundContent = {
-                                Box(
-                                    contentAlignment = Alignment.CenterEnd,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.errorContainer)
-                                        .padding(end = 20.dp),
-                                ) {
-                                    Icon(Icons.Filled.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.onErrorContainer)
-                                }
-                            },
-                        ) {
-                            NoteRowLabel(note = n) { editorNoteId = n.id }
+                        if (readOnly) {
+                            NoteRowLabel(note = n) { remoteNote = n }
+                        } else {
+                            val dismissState = rememberSwipeToDismissBoxState(
+                                confirmValueChange = { v ->
+                                    if (v == SwipeToDismissBoxValue.EndToStart) {
+                                        store.deleteNote(n.id)
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                },
+                            )
+                            SwipeToDismissBox(
+                                state = dismissState,
+                                enableDismissFromStartToEnd = false,
+                                backgroundContent = {
+                                    Box(
+                                        contentAlignment = Alignment.CenterEnd,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.errorContainer)
+                                            .padding(end = 20.dp),
+                                    ) {
+                                        Icon(Icons.Filled.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.onErrorContainer)
+                                    }
+                                },
+                            ) {
+                                NoteRowLabel(note = n) { editorNoteId = n.id }
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/** 远程设备的笔记：只读查看（渲染 HTML，图片内嵌 base64），不能编辑 */
+@Composable
+fun RemoteNoteView(note: Note, onDismiss: () -> Unit) {
+    val store = LocalBookStore.current
+    val html = remember(note) {
+        fun mapRef(ref: String): String {
+            val f = java.io.File(store.dataDir, ref)
+            if (!f.exists()) return ""
+            val ext = extOf(ref)
+            return "data:image/${if (ext == "jpg") "jpeg" else ext};base64," +
+                android.util.Base64.encodeToString(f.readBytes(), android.util.Base64.NO_WRAP)
+        }
+        when (note.format) {
+            NoteFormat.MARKDOWN -> Markdown.render(note.content) { ref -> mapRef(ref) }
+            NoteFormat.WORD -> sanitizeLite(Markdown.mapAssetsInHtml(note.content) { ref -> mapRef(ref) })
+        }
+    }
+    Surface(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
+                }
+                Text(
+                    note.title.trim().ifEmpty { "无标题" },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                )
+                Text("远程 · 只读", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            HtmlPreview(html = html, modifier = Modifier.fillMaxSize())
         }
     }
 }

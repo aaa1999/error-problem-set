@@ -40,6 +40,8 @@ import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Update
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -91,6 +93,13 @@ fun BrowseTab(
     val store = LocalBookStore.current
     val context = LocalContext.current
     val db by store.db.collectAsState()
+    val remoteDevices by store.remoteDevices.collectAsState()
+
+    // 远程设备范围（「☁ 同步 → 按设备拉取」后可浏览）：null = 本机；设备范围只读
+    var deviceScope by remember { mutableStateOf<String?>(null) }
+    val remote = remoteDevices.firstOrNull { it.id == deviceScope }
+    val activeDb = remote?.db ?: db
+    val readOnly = remote != null
 
     // "" 全部 | "uncat" 未分类 | 文件夹 id
     var selectedFolder by remember { mutableStateOf("") }
@@ -102,9 +111,9 @@ fun BrowseTab(
     var orderRaw by remember { mutableStateOf(prefs.getString("browseOrder", "time") ?: "time") }
     var shuffleSeed by remember { mutableIntStateOf((1..Int.MAX_VALUE).random()) }
 
-    val list = remember(db, selectedFolder, activeTags.toList(), tagModeAnd, orderRaw, shuffleSeed) {
-        var arr = db.mistakes
-        val folders = db.folders
+    val list = remember(activeDb, selectedFolder, activeTags.toList(), tagModeAnd, orderRaw, shuffleSeed, readOnly) {
+        var arr = activeDb.mistakes
+        val folders = activeDb.folders
         if (selectedFolder == "uncat") {
             val ids = folders.map { it.id }.toSet()
             arr = arr.filter { m -> m.folderIds.none { it in ids } }
@@ -112,7 +121,7 @@ fun BrowseTab(
             val set = descendantSet(folders, selectedFolder)
             arr = arr.filter { m -> m.folderIds.any { it in set } }
         }
-        if (activeTags.isNotEmpty()) {
+        if (activeTags.isNotEmpty() && !readOnly) {
             arr = arr.filter { m ->
                 if (tagModeAnd) activeTags.all { it in m.tags } else activeTags.any { it in m.tags }
             }
@@ -180,7 +189,13 @@ fun BrowseTab(
     val crumb = when {
         selectedFolder.isEmpty() -> "全部错题"
         selectedFolder == "uncat" -> "未分类"
-        else -> folderPathName(db.folders, selectedFolder)
+        else -> folderPathName(activeDb.folders, selectedFolder)
+    }.let { if (remote != null) "${remote.name} · $it" else it }
+
+    // 切设备即切数据源：清掉文件夹/标签筛选
+    LaunchedEffect(deviceScope) {
+        selectedFolder = ""
+        activeTags.clear()
     }
 
     Surface(modifier = Modifier.fillMaxSize()) {
@@ -190,34 +205,59 @@ fun BrowseTab(
                     Text(crumb, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
                 actions = {
-                    // 录入三入口：普通 / 文件夹 / 标签
-                    var addMenu by remember { mutableStateOf(false) }
-                    Box {
-                        IconButton(onClick = { addMenu = true }) {
-                            Icon(Icons.Filled.Add, contentDescription = "添加")
+                    // 设备切换：本机 + 已拉取的远程设备（只读浏览）
+                    if (remoteDevices.isNotEmpty()) {
+                        var deviceMenu by remember { mutableStateOf(false) }
+                        Box {
+                            TextButton(onClick = { deviceMenu = true }) {
+                                Icon(Icons.Filled.SwapVert, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(if (readOnly) remote.name else "本机", style = MaterialTheme.typography.labelMedium)
+                            }
+                            DropdownMenu(expanded = deviceMenu, onDismissRequest = { deviceMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(if (!readOnly) "✓ 本机" else "本机") },
+                                    onClick = { deviceMenu = false; deviceScope = null },
+                                )
+                                remoteDevices.forEach { d ->
+                                    DropdownMenuItem(
+                                        text = { Text(if (deviceScope == d.id) "✓ ${d.name}（只读）" else "${d.name}（只读）") },
+                                        onClick = { deviceMenu = false; deviceScope = d.id },
+                                    )
+                                }
+                            }
                         }
-                        DropdownMenu(expanded = addMenu, onDismissRequest = { addMenu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("普通录入") },
-                                leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
-                                onClick = { addMenu = false; entryNew = true },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("文件夹录入…") },
-                                leadingIcon = { Icon(Icons.Filled.Folder, contentDescription = null) },
-                                onClick = { addMenu = false; folderEntrySel.clear(); folderEntryOpen = true },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("标签录入…") },
-                                leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null) },
-                                onClick = { addMenu = false; tagEntrySel.clear(); tagEntryOpen = true },
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("批量导入截图") },
-                                leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
-                                onClick = { addMenu = false; openBatchImport() },
-                            )
+                    }
+                    // 录入三入口：普通 / 文件夹 / 标签（远程设备范围只读，不显示）
+                    if (!readOnly) {
+                        var addMenu by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { addMenu = true }) {
+                                Icon(Icons.Filled.Add, contentDescription = "添加")
+                            }
+                            DropdownMenu(expanded = addMenu, onDismissRequest = { addMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("普通录入") },
+                                    leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                                    onClick = { addMenu = false; entryNew = true },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("文件夹录入…") },
+                                    leadingIcon = { Icon(Icons.Filled.Folder, contentDescription = null) },
+                                    onClick = { addMenu = false; folderEntrySel.clear(); folderEntryOpen = true },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("标签录入…") },
+                                    leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null) },
+                                    onClick = { addMenu = false; tagEntrySel.clear(); tagEntryOpen = true },
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("批量导入截图") },
+                                    leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
+                                    onClick = { addMenu = false; openBatchImport() },
+                                )
+                            }
                         }
                     }
                     IconButton(onClick = openSync) {
@@ -230,7 +270,7 @@ fun BrowseTab(
             // filterBar 常驻（空列表也显示）：排列方式与筛选菜单永远可达，
             // 避免错误率排序下点到没有选择题的文件夹时被困在空态里
             FilterBar(
-                db = db,
+                db = activeDb,
                 selectedFolder = selectedFolder,
                 onSelectFolder = { selectedFolder = it },
                 activeTags = activeTags,
@@ -245,20 +285,29 @@ fun BrowseTab(
                 onReshuffle = { shuffleSeed = (1..Int.MAX_VALUE).random() },
                 onNewTag = { newTagOpen = true },
                 tagCounts = store.tagCounts,
+                readOnly = readOnly,
+                remoteName = remote?.name,
             )
 
             if (list.isEmpty()) {
-                val emptyLib = db.mistakes.isEmpty()
+                val emptyLib = activeDb.mistakes.isEmpty()
                 EmptyState(
-                    icon = if (emptyLib) Icons.AutoMirrored.Filled.MenuBook else Icons.Filled.Update,
-                    title = if (emptyLib) "还没有错题" else "当前条件下没有错题",
+                    icon = if (emptyLib) {
+                        if (readOnly) Icons.Filled.PhoneAndroid else Icons.AutoMirrored.Filled.MenuBook
+                    } else Icons.Filled.Update,
+                    title = when {
+                        emptyLib && readOnly -> "该设备还没有错题"
+                        emptyLib -> "还没有错题"
+                        else -> "当前条件下没有错题"
+                    },
                     message = when {
+                        emptyLib && readOnly -> "${remote?.name ?: "该设备"} 推送到服务端的库是空的。"
                         emptyLib -> "先录入第一道题，或把攒了一堆的截图批量导入进来。"
                         orderRaw == "error" -> "没有带选项的错题——错误率排序只统计录入时填了选项并标记了正确答案的题；也可换文件夹或标签筛选条件试试。"
                         else -> "换个文件夹或标签筛选条件试试。"
                     },
-                    actionTitle = if (emptyLib) "＋ 录入错题" else "清除筛选",
-                    action = if (emptyLib) ({ entryNew = true }) else ({
+                    actionTitle = if (emptyLib && !readOnly) "＋ 录入错题" else "清除筛选",
+                    action = if (emptyLib && !readOnly) ({ entryNew = true }) else ({
                         selectedFolder = ""
                         activeTags.clear()
                     }),
@@ -279,6 +328,8 @@ fun BrowseTab(
                             onEdit = { entryTarget = m },
                             onTagEdit = { tagSheetFor = m },
                             onMoveRequest = { moveOpen = true },
+                            foldersOverride = activeDb.folders,
+                            readOnly = readOnly,
                         )
                     }
                 }
@@ -440,6 +491,8 @@ private fun FilterBar(
     onReshuffle: () -> Unit,
     onNewTag: () -> Unit,
     tagCounts: List<Pair<String, Int>>,
+    readOnly: Boolean = false,
+    remoteName: String? = null,
 ) {
     val folders = db.folders
     Column(
@@ -498,8 +551,14 @@ private fun FilterBar(
 
             Spacer(Modifier.width(8.dp))
 
-            // 标签菜单（无筛选时）
-            if (activeTags.isEmpty() && selectedFolder.isEmpty()) {
+            // 标签菜单（无筛选时）；远程设备范围：标签属各设备库，本机标签菜单不适用
+            if (readOnly) {
+                Text(
+                    "📱 ${remoteName ?: ""} 只读",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else if (activeTags.isEmpty() && selectedFolder.isEmpty()) {
                 var tagMenu by remember { mutableStateOf(false) }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -888,6 +947,10 @@ fun MistakeCardView(
     onEdit: () -> Unit,
     onTagEdit: () -> Unit,
     onMoveRequest: () -> Unit,
+    /** 数据源文件夹（浏览远程设备时传该设备的；null = 本机 store.db） */
+    foldersOverride: List<Folder>? = null,
+    /** 远程设备只读：隐藏编辑/标签/移动/删除，作答禁用，复制可用 */
+    readOnly: Boolean = false,
 ) {
     val store = LocalBookStore.current
     val context = LocalContext.current
@@ -898,12 +961,13 @@ fun MistakeCardView(
     var picked by remember(mistake.id) { mutableStateOf<Int?>(null) }
 
     val analysisEmpty = isBlocksEmpty(mistake.analysis)
+    val folders = foldersOverride ?: store.db.value.folders
 
     fun answerOption(i: Int) {
-        if (picked != null) return
+        if (readOnly || picked != null) return
         val ans = mistake.answer ?: return
         picked = i
-        onReveal() // 答完自动翻开解析
+        onReveal() // 答完自动看解析
         val ok = i == ans
         store.updateMistake(
             mistake.copy(
@@ -927,16 +991,18 @@ fun MistakeCardView(
         // 标签行
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             mistake.tags.forEach { t -> TagChip(t) }
-            Text(
-                "＋ 标签",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .clickable { onTagEdit() }
-                    .padding(horizontal = 9.dp, vertical = 4.dp),
-            )
+            if (!readOnly) {
+                Text(
+                    "＋ 标签",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { onTagEdit() }
+                        .padding(horizontal = 9.dp, vertical = 4.dp),
+                )
+            }
         }
 
         Text("题目", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -957,7 +1023,9 @@ fun MistakeCardView(
             if (analysisEmpty) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("这道题还没有解析", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = onEdit) { Text("去补解析") }
+                    if (!readOnly) {
+                        TextButton(onClick = onEdit) { Text("去补解析") }
+                    }
                 }
             } else {
                 BlockListView(blocks = mistake.analysis, onImageTap = onImageTap)
@@ -999,7 +1067,7 @@ fun MistakeCardView(
                         text = { Text("只复制题目（含图片）") },
                         onClick = {
                             menuOpen = false
-                            copyMistakeToClipboard(context, mistake, store.db.value.folders, store.dataDir, questionOnly = true)
+                            copyMistakeToClipboard(context, mistake, folders, store.dataDir, questionOnly = true)
                             copiedFlash = true
                         },
                     )
@@ -1007,19 +1075,21 @@ fun MistakeCardView(
                         text = { Text("复制全部内容（题目、选项、解析…）") },
                         onClick = {
                             menuOpen = false
-                            copyMistakeToClipboard(context, mistake, store.db.value.folders, store.dataDir)
+                            copyMistakeToClipboard(context, mistake, folders, store.dataDir)
                             copiedFlash = true
                         },
                     )
-                    DropdownMenuItem(text = { Text("编辑") }, leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }, onClick = { menuOpen = false; onEdit() })
-                    DropdownMenuItem(text = { Text("标签") }, leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null) }, onClick = { menuOpen = false; onTagEdit() })
-                    DropdownMenuItem(text = { Text("调整所属文件夹") }, leadingIcon = { Icon(Icons.Filled.Folder, contentDescription = null) }, onClick = { menuOpen = false; onMoveRequest() })
-                    HorizontalDivider()
-                    DropdownMenuItem(
-                        text = { Text("删除", color = MaterialTheme.colorScheme.error) },
-                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                        onClick = { menuOpen = false; confirmDelete = true },
-                    )
+                    if (!readOnly) {
+                        DropdownMenuItem(text = { Text("编辑") }, leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }, onClick = { menuOpen = false; onEdit() })
+                        DropdownMenuItem(text = { Text("标签") }, leadingIcon = { Icon(Icons.Filled.Label, contentDescription = null) }, onClick = { menuOpen = false; onTagEdit() })
+                        DropdownMenuItem(text = { Text("调整所属文件夹") }, leadingIcon = { Icon(Icons.Filled.Folder, contentDescription = null) }, onClick = { menuOpen = false; onMoveRequest() })
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                            onClick = { menuOpen = false; confirmDelete = true },
+                        )
+                    }
                 }
             }
         }

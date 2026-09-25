@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.Json
+import org.json.JSONObject
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -23,11 +24,44 @@ import java.util.TimeZone
 
 private const val MAX_SNAPSHOTS = 20
 
+// MARK: - 远程设备库（按设备拉取，不合并；对应桌面端 src/lib/devices.ts、iOS 端 DeviceStore）
+
+/** 从服务端拉取的一台设备的整库快照（只读浏览） */
+data class RemoteDevice(val id: String, val name: String, val db: Database)
+
+object DeviceStore {
+    private val ID_RE = Regex("^[A-Za-z0-9_-]{1,64}$")
+
+    fun isValidId(s: String): Boolean = ID_RE.matches(s)
+
+    /** 读取数据目录 devices/ 下全部已拉取的设备库（devices/<id>/data.json；device.json 存名称），按名称自然排序 */
+    fun load(dataDir: File): List<RemoteDevice> {
+        val root = File(dataDir, "devices")
+        val dirs = root.listFiles()?.filter { it.isDirectory && isValidId(it.name) } ?: return emptyList()
+        return dirs
+            .mapNotNull { dir ->
+                val dataFile = File(dir, "data.json")
+                if (!dataFile.exists()) return@mapNotNull null
+                val db = BookStore.loadDb(dir)
+                val name = try {
+                    JSONObject(File(dir, "device.json").readText()).optString("name").ifEmpty { dir.name }
+                } catch (_: Exception) {
+                    dir.name
+                }
+                RemoteDevice(dir.name, name, db)
+            }
+            .sortedWith { a, b -> if (naturalLess(a.name, b.name)) -1 else if (naturalLess(b.name, a.name)) 1 else a.name.compareTo(b.name) }
+    }
+}
+
 class BookStore(context: Context) {
 
     val db = MutableStateFlow(Database())
     val loadError = MutableStateFlow<String?>(null)
     val dbState: StateFlow<Database> get() = db
+
+    /** 已拉取的远程设备库（只读浏览；「☁ 同步 → 按设备拉取」后刷新） */
+    val remoteDevices = MutableStateFlow<List<RemoteDevice>>(emptyList())
 
     val dataDir: File = File(context.getExternalFilesDir(null) ?: context.filesDir, "错题本")
     val assetsDir: File get() = File(dataDir, "assets")
@@ -55,6 +89,12 @@ class BookStore(context: Context) {
         } catch (e: Exception) {
             loadError.value = "数据目录初始化失败：${e.message}"
         }
+        remoteDevices.value = DeviceStore.load(dataDir)
+    }
+
+    /** 重新读取 devices/ 下的设备库（拉取同步完成后调用） */
+    fun reloadRemoteDevices() {
+        remoteDevices.value = DeviceStore.load(dataDir)
     }
 
     // MARK: 文件层

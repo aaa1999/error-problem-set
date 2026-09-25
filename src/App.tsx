@@ -21,12 +21,13 @@ type View =
 type TopMode = "book" | "notes" | "practice";
 
 export default function App() {
-  const { status, dataDir, db, allTags, chooseDataDir } = useBook();
+  const { status, dataDir, db, allTags, chooseDataDir, remoteDevices } = useBook();
   const [top, setTop] = useState<TopMode>("book");
   const [view, setView] = useState<View>({ name: "browse" });
-  // 浏览页当前选中的文件夹："" 全部 | "cat" 已分类 | "uncat" 未分类 | 文件夹 id；也作为录入/批量导入的默认文件夹
+  // 浏览页当前选中的范围："" 全部 | "cat" 已分类 | "uncat" 未分类 | 文件夹 id | "device:<id>[/子范围]" 远程设备（只读浏览）
   const [folderSel, setFolderSel] = useState<string>("");
-  const defaultFolderId = folderSel !== "" && folderSel !== "cat" && folderSel !== "uncat" ? folderSel : null;
+  const defaultFolderId =
+    folderSel !== "" && folderSel !== "cat" && folderSel !== "uncat" && !folderSel.startsWith("device:") ? folderSel : null;
   const [syncOpen, setSyncOpen] = useState(false);
   // 做题会话提升到 App 层：切 tab 不丢答题进度
   const [practice, setPractice] = useState<PracticeSession | null>(null);
@@ -129,6 +130,8 @@ export default function App() {
         <div className="topbar-right">
           <span className="muted" title={dataDir}>
             {shortDir(dataDir)} · {db.mistakes.length} 题 · {db.notes.length} 笔记
+            {remoteDevices.length > 0 &&
+              ` · 📱${remoteDevices.length} 台远程设备（侧栏只读浏览）`}
           </span>
           <button className="btn btn-sm" onClick={() => setSyncOpen(true)}>
             同步

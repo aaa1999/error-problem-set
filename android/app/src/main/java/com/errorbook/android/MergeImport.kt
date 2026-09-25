@@ -8,12 +8,13 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileNotFoundException
 
-// MARK: - 数据合并核心（合并导入与远程拉取共用，对应桌面端 src/lib/merge.ts、iOS 端 MergeImport.swift）
+// MARK: - 数据合并核心（合并导入使用，对应桌面端 src/lib/merge.ts、iOS 端 MergeImport.swift）
 // 幂等合并：文件夹按「名称+父级」、错题/笔记按 id 去重、预建标签并入、图片按内容哈希只取缺的。
 // 可重复执行，已并入的自动跳过。
+// 远程同步已改为按设备分开落盘、不合并（SyncEngine.kt + BookStore.kt 的 DeviceStore）。
 
 data class MergePlan(
-    /** 合并导入时的源目录显示名；远程拉取为 null */
+    /** 合并导入时的源目录显示名 */
     val sourceName: String?,
     val source: Database,
     val newMistakes: List<Mistake>,
@@ -205,7 +206,7 @@ suspend fun runMergeCore(
         done++
     }
 
-    // 3. 错题与笔记入册（保留原 id/时间戳，错题的每个所属文件夹都映射到合并后的目标）+ 预建标签并入
+    // 3. 错题与笔记入册（保留原 id/时间戳与选项/统计，错题的每个所属文件夹都映射到合并后的目标）+ 预建标签并入
     val mapped = plan.newMistakes.map { m ->
         m.copy(folderIds = m.folderIds.mapNotNull { fmap[it] })
     }
@@ -227,7 +228,7 @@ suspend fun runMergeCore(
     )
 }
 
-/** 合并结果的统一文案（合并导入 / 远程拉取共用口径） */
+/** 合并结果的统一文案（合并导入用） */
 fun mergeOutcomeText(plan: MergePlan, o: MergeOutcome): String {
     val parts = mutableListOf(
         "新导入 ${o.newMistakes} 道错题、${o.newNotes} 篇笔记",

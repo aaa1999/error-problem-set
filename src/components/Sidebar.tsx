@@ -5,6 +5,8 @@ import { countCategorized, countInFolder, countUncategorized, descendantSet, gro
 import { DND_FOLDER, DND_MISTAKE } from "../lib/dnd";
 import { useBook } from "../store";
 import { NameModal } from "./NameModal";
+import { RemoteDevicesSection } from "./RemoteDevices";
+import { parseDeviceSel } from "../lib/devices";
 
 interface Props {
   selected: string; // "" 全部 | "uncat" 未分类 | 文件夹 id
@@ -37,7 +39,7 @@ export function Sidebar({
   onNewInFolder,
   onNewWithTag,
 }: Props) {
-  const { db, allTags, findOrCreateFolderPath, renameFolder, moveFolder, deleteFolder, createTag, getMistake, setMistakeFolders } =
+  const { db, allTags, findOrCreateFolderPath, renameFolder, moveFolder, deleteFolder, createTag, getMistake, setMistakeFolders, remoteDevices } =
     useBook();
   const [modal, setModal] = useState<
     { title: string; initial: string; placeholder?: string; onOk: (name: string) => void } | null
@@ -237,6 +239,10 @@ export function Sidebar({
         )}
       </div>
 
+      <RemoteDevicesSection devices={remoteDevices} selected={selected} onSelect={onSelect} />
+
+      {/* 远程设备范围下标签筛选不适用（标签属本机库） */}
+      {!parseDeviceSel(selected) && (
       <div className="side-section">
         <div className="side-head">
           <span>标签{activeTags.length > 0 ? `（${activeTags.length}）` : ""}</span>
@@ -276,6 +282,7 @@ export function Sidebar({
           );
         })}
       </div>
+      )}
 
       {modal && (
         <NameModal

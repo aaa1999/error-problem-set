@@ -1,11 +1,12 @@
 import Foundation
 
-// MARK: - 数据合并核心（合并导入与远程拉取共用，对应桌面端 src/lib/merge.ts）
+// MARK: - 数据合并核心（合并导入使用，对应桌面端 src/lib/merge.ts）
 // 幂等合并：文件夹按「名称+父级」、错题/笔记按 id 去重、预建标签并入、图片按内容哈希只取缺的。
 // 可重复执行，已并入的自动跳过。
+// 远程同步已改为按设备分开落盘、不合并（SyncEngine.swift + BookStore.swift 的 DeviceStore）。
 
 struct MergePlan {
-  /// 目录合并导入时的源目录；远程拉取为 nil
+  /// 目录合并导入时的源目录
   var sourceDir: URL?
   var source: Database
   var newMistakes: [Mistake]
@@ -142,6 +143,11 @@ func runMergeCore(
     let dst = store.findOrCreateFolder(name: f.name, parentId: f.parentId.flatMap { fmap[$0] })
     fmap[f.id] = dst.id
   }
+  func remap(_ m: Mistake) -> Mistake {
+    var x = m
+    x.folderIds = m.folderIds.compactMap { fmap[$0] }
+    return x
+  }
 
   // 2. 取回缺失的图片（本地已有的由 ensureAsset 跳过；取不到的保留引用跳过不阻断）
   var fetched = 0
@@ -157,11 +163,8 @@ func runMergeCore(
     done += 1
   }
 
-  // 3. 错题与笔记入册（保留原 id/时间戳，错题的每个所属文件夹都映射到合并后的目标）+ 预建标签并入
-  let mapped = plan.newMistakes.map { m in
-    Mistake(id: m.id, folderIds: m.folderIds.compactMap { fmap[$0] }, question: m.question, analysis: m.analysis, tags: m.tags, createdAt: m.createdAt, updatedAt: m.updatedAt)
-  }
-  store.addMistakes(mapped)
+  // 3. 错题与笔记入册（保留原 id/时间戳与选项/统计，错题的每个所属文件夹都映射到合并后的目标）+ 预建标签并入
+  store.addMistakes(plan.newMistakes.map(remap))
   done += plan.newMistakes.count
   onProgress(done, total, nil)
   if !plan.newNotes.isEmpty { store.addNotes(plan.newNotes) }
@@ -179,7 +182,7 @@ func runMergeCore(
   )
 }
 
-/// 合并结果的统一文案（合并导入 / 远程拉取共用口径）
+/// 合并结果的统一文案（合并导入用）
 func mergeOutcomeText(_ plan: MergePlan, _ o: MergeOutcome) -> String {
   var parts = [
     "新导入 \(o.newMistakes) 道错题、\(o.newNotes) 篇笔记",

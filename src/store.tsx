@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { join } from "@tauri-apps/api/path";
 import type { Database, Folder, ImageBlock, Mistake, Note, PendingImport } from "./types";
 import { emptyDb, ensureDirs, loadDb, saveDb } from "./lib/db";
+import { loadRemoteDevices, type RemoteDevice } from "./lib/devices";
 import { assetUrlFor } from "./lib/images";
 import { descendantSet } from "./lib/folders";
 import { naturalCompare, uuid } from "./lib/utils";
@@ -51,6 +52,9 @@ export interface Book {
   addPendingImports: (ps: PendingImport[]) => Promise<number>;
   /** 导入完成/丢弃后移除清单 */
   removePendingImport: (id: string) => Promise<void>;
+  /** 已拉取的远程设备库（只读浏览，见 lib/devices.ts）；拉取同步完成后调 refreshRemoteDevices 刷新 */
+  remoteDevices: RemoteDevice[];
+  refreshRemoteDevices: () => Promise<void>;
 }
 
 const BookCtx = createContext<Book | null>(null);
@@ -61,6 +65,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const [dataDir, setDataDir] = useState("");
   const [assetsDir, setAssetsDir] = useState("");
   const [db, setDb] = useState<Database>(emptyDb);
+  const [remoteDevices, setRemoteDevices] = useState<RemoteDevice[]>([]);
   const dbRef = useRef(db);
   dbRef.current = db;
 
@@ -78,6 +83,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         setAssetsDir(await join(saved, "assets"));
         setDb(loaded);
         setStatus("ready");
+        setRemoteDevices(await loadRemoteDevices(saved).catch(() => []));
       } catch (e) {
         console.error("数据目录不可用：", e);
         setStatus("welcome");
@@ -92,8 +98,14 @@ export function BookProvider({ children }: { children: ReactNode }) {
     setDataDir(dir);
     setAssetsDir(await join(dir, "assets"));
     setDb(loaded);
+    setRemoteDevices(await loadRemoteDevices(dir).catch(() => []));
     setStatus("ready");
   }, []);
+
+  const refreshRemoteDevices = useCallback(async () => {
+    if (!dataDir) return;
+    setRemoteDevices(await loadRemoteDevices(dataDir).catch(() => []));
+  }, [dataDir]);
 
   const persist = useCallback(
     async (next: Database) => {
@@ -352,6 +364,8 @@ export function BookProvider({ children }: { children: ReactNode }) {
       addPendingImport,
       addPendingImports,
       removePendingImport,
+      remoteDevices,
+      refreshRemoteDevices,
     }),
     [
       status,
@@ -382,6 +396,8 @@ export function BookProvider({ children }: { children: ReactNode }) {
       addPendingImport,
       addPendingImports,
       removePendingImport,
+      remoteDevices,
+      refreshRemoteDevices,
     ],
   );
 

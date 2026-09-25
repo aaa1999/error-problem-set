@@ -8,10 +8,51 @@ let maxSnapshots = 20
 /// 快照至少间隔 1 分钟做一次，避免刷屏
 private var lastSnapshotAt: Double = 0
 
+// MARK: - 远程设备库（按设备拉取，不合并；对应桌面端 src/lib/devices.ts）
+
+/** 从服务端拉取的一台设备的整库快照（只读浏览） */
+struct RemoteDevice: Identifiable, Equatable {
+  let id: String
+  let name: String
+  let db: Database
+}
+
+enum DeviceStore {
+  /// 数据目录 devices/ 下已拉取的设备 id 白名单（与服务端一致，防目录名注入）
+  static func isValidId(_ s: String) -> Bool {
+    s.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil
+  }
+
+  /** 读取全部已拉取的设备库（devices/<id>/data.json；device.json 存名称），按名称自然排序 */
+  static func load(dataDir: URL) -> [RemoteDevice] {
+    let fm = FileManager.default
+    let root = dataDir.appendingPathComponent("devices")
+    guard let names = try? fm.contentsOfDirectory(atPath: root.path) else { return [] }
+    var out: [RemoteDevice] = []
+    for id in names {
+      guard isValidId(id) else { continue }
+      let dir = root.appendingPathComponent(id)
+      guard fm.fileExists(atPath: dir.appendingPathComponent("data.json").path) else { continue }
+      let db = (try? BookStore.loadDb(from: dir)) ?? Database()
+      var name = id
+      if let data = try? Data(contentsOf: dir.appendingPathComponent("device.json")),
+         let meta = try? JSONDecoder().decode(DeviceMeta.self, from: data), let n = meta.name, !n.isEmpty {
+        name = n
+      }
+      out.append(RemoteDevice(id: id, name: name, db: db))
+    }
+    return out.sorted { String.naturalLess($0.name, $1.name) }
+  }
+
+  fileprivate struct DeviceMeta: Decodable { var name: String? }
+}
+
 @MainActor
 final class BookStore: ObservableObject {
   @Published private(set) var db = Database()
   @Published private(set) var loadError: String?
+  /** 已拉取的远程设备库（只读浏览；「☁ 同步 → 按设备拉取」后刷新） */
+  @Published private(set) var remoteDevices: [RemoteDevice] = []
 
   let dataDir: URL
   var assetsDir: URL { dataDir.appendingPathComponent("assets") }
@@ -33,6 +74,12 @@ final class BookStore: ObservableObject {
     } catch {
       loadError = "数据目录初始化失败：\(error.localizedDescription)"
     }
+    remoteDevices = DeviceStore.load(dataDir: dataDir)
+  }
+
+  /** 重新读取 devices/ 下的设备库（拉取同步完成后调用） */
+  func reloadRemoteDevices() {
+    remoteDevices = DeviceStore.load(dataDir: dataDir)
   }
 
   // MARK: 文件层

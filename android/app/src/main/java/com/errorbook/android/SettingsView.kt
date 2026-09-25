@@ -213,7 +213,7 @@ fun SettingsView(onOpenSync: () -> Unit) {
                 ) {
                     Icon(Icons.Filled.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("推送到自建服务器", modifier = Modifier.weight(1f))
+                    Text("同步（推送 / 按设备拉取）", modifier = Modifier.weight(1f))
                     Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 SyncStore.load(context)?.let { t ->

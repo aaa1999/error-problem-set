@@ -6,10 +6,21 @@ import PhotosUI
 struct NotesTab: View {
   @EnvironmentObject private var store: BookStore
   @State private var query = ""
+  // 远程设备范围（「☁ 同步 → 按设备拉取」后可浏览）：nil = 本机；设备范围只读
+  @State private var deviceScope: String?
+  @State private var path: [String] = [String]()
+  @State private var autoOpenNote: Bool?
+
+  private var remote: RemoteDevice? {
+    guard let id = deviceScope else { return nil }
+    return store.remoteDevices.first { $0.id == id }
+  }
+  private var activeNotes: [Note] { remote?.db.notes ?? store.db.notes }
+  private var readOnly: Bool { remote != nil }
 
   private var notes: [Note] {
     let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    return store.db.notes
+    return activeNotes
       .filter { n in
         q.isEmpty || n.title.lowercased().contains(q) || n.content.lowercased().contains(q)
       }
@@ -19,25 +30,33 @@ struct NotesTab: View {
   var body: some View {
     NavigationStack(path: $path) {
       Group {
-        if store.db.notes.isEmpty {
+        if activeNotes.isEmpty {
           EmptyStateView(
-            icon: "note.text",
-            title: "笔记",
-            message: "Markdown 笔记（即时预览、可插入图片），均支持导出 PDF / Word。\nWord 富文本笔记可查看，编辑请用桌面端。"
+            icon: readOnly ? "iphone" : "note.text",
+            title: readOnly ? "\(remote?.name ?? "该设备") 的笔记" : "笔记",
+            message: readOnly
+              ? "该设备还没有推送过笔记，或库是空的。"
+              : "Markdown 笔记（即时预览、可插入图片），均支持导出 PDF / Word。\nWord 富文本笔记可查看，编辑请用桌面端。"
           )
         } else {
           List {
             ForEach(notes) { n in
               NavigationLink {
-                NoteEditorView(noteId: n.id)
+                if readOnly {
+                  RemoteNoteView(note: n)
+                } else {
+                  NoteEditorView(noteId: n.id)
+                }
               } label: {
                 NoteRowLabel(note: n)
               }
               .swipeActions {
-                Button(role: .destructive) {
-                  store.deleteNote(n.id)
-                } label: {
-                  Label("删除", systemImage: "trash")
+                if !readOnly {
+                  Button(role: .destructive) {
+                    store.deleteNote(n.id)
+                  } label: {
+                    Label("删除", systemImage: "trash")
+                  }
                 }
               }
             }
@@ -45,22 +64,40 @@ struct NotesTab: View {
           .listStyle(.plain)
         }
       }
-      .navigationTitle("笔记")
+      .navigationTitle(readOnly ? "\(remote?.name ?? "") 笔记" : "笔记")
       .searchable(text: $query, prompt: "搜索笔记…")
       .toolbar {
+        if !store.remoteDevices.isEmpty {
+          ToolbarItem(placement: .topBarLeading) {
+            Menu {
+              Button { deviceScope = nil } label: { Label("本机", systemImage: readOnly ? "iphone" : "checkmark") }
+              ForEach(store.remoteDevices) { d in
+                Button { deviceScope = d.id } label: { Label(d.name, systemImage: deviceScope == d.id ? "checkmark" : "iphone") }
+              }
+            } label: {
+              Label(readOnly ? (remote?.name ?? "设备") : "本机", systemImage: "arrow.up.arrow.down.circle")
+            }
+          }
+        }
         ToolbarItem(placement: .topBarTrailing) {
-          Button {
-            let n = Note(title: "", format: .markdown, content: "")
-            store.addNote(n)
-            // 直接推入新建的笔记（内容为空切走会自动丢弃）
-            path.append(n.id)
-          } label: {
-            Image(systemName: "square.and.pencil")
+          if !readOnly {
+            Button {
+              let n = Note(title: "", format: .markdown, content: "")
+              store.addNote(n)
+              // 直接推入新建的笔记（内容为空切走会自动丢弃）
+              path.append(n.id)
+            } label: {
+              Image(systemName: "square.and.pencil")
+            }
           }
         }
       }
       .navigationDestination(for: String.self) { id in
-        NoteEditorView(noteId: id)
+        if let n = activeNotes.first(where: { $0.id == id }), readOnly {
+          RemoteNoteView(note: n)
+        } else {
+          NoteEditorView(noteId: id)
+        }
       }
       .onAppear {
         // 截图/自动化验证用：launchArguments 传 -note <id> 直接进入指定笔记
@@ -72,11 +109,53 @@ struct NotesTab: View {
           }
         }
       }
+      .onChange(of: deviceScope) { _ in path = [String]() }
+    }
+  }
+}
+
+/// 远程设备的笔记：只读查看（渲染 HTML，图片内嵌 base64），不能编辑
+struct RemoteNoteView: View {
+  @EnvironmentObject private var store: BookStore
+  let note: Note
+
+  private var html: String {
+    func mapRef(_ ref: String) -> String {
+      let url = store.dataDir.appendingPathComponent(ref)
+      guard let data = try? Data(contentsOf: url) else { return "" }
+      let ext = extOf(ref)
+      return "data:image/\(ext == "jpg" ? "jpeg" : ext);base64,\(data.base64EncodedString())"
+    }
+    switch note.format {
+    case .markdown:
+      return Markdown.render(note.content, mapAsset: mapRef)
+    case .word:
+      return sanitizeLite(Markdown.mapAssetsInHtml(note.content) { mapRef($0) })
     }
   }
 
-  @State private var path: [String] = []
-  @State private var autoOpenNote: Bool?
+  var body: some View {
+    VStack(spacing: 0) {
+      HStack(spacing: 8) {
+        Text(note.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "无标题" : note.title)
+          .font(.headline)
+        Text(note.format == .word ? "Word" : "MD")
+          .font(.caption2.bold())
+          .padding(.horizontal, 6)
+          .padding(.vertical, 2)
+          .background(Capsule().fill(Color.blue.opacity(0.15)))
+          .foregroundStyle(.blue)
+        Spacer()
+        Text(formatTime(note.updatedAt)).font(.caption2).foregroundStyle(.secondary)
+      }
+      .padding(.horizontal, 14)
+      .padding(.vertical, 8)
+      Divider()
+      HTMLPreview(html: html)
+    }
+    .navigationTitle("远程笔记 · 只读")
+    .navigationBarTitleDisplayMode(.inline)
+  }
 }
 
 /// 笔记列表行

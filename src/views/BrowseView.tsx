@@ -6,6 +6,7 @@ import { DND_MISTAKE } from "../lib/dnd";
 import { copyMistake } from "../lib/copy";
 import { isBlocksEmpty, newShuffleSeed, seededShuffle, formatDay, formatTime } from "../lib/utils";
 import { useBook } from "../store";
+import { parseDeviceSel } from "../lib/devices";
 import { BlockView } from "../components/BlockView";
 import { Lightbox } from "../components/Lightbox";
 import { Sidebar } from "../components/Sidebar";
@@ -40,7 +41,12 @@ export function BrowseView({
   selected: string;
   onSelect: (s: string) => void;
 }) {
-  const { db, allTags, assetSrc, assetsDir, deleteMistake, setMistakeFolders, updateMistake } = useBook();
+  const { db, allTags, assetSrc, assetsDir, deleteMistake, setMistakeFolders, updateMistake, remoteDevices } = useBook();
+  // 远程设备范围（侧栏「远程设备」选择 device:<id>[/子范围]）：数据源换成该设备的库，只读浏览
+  const devSel = parseDeviceSel(selected);
+  const remote = devSel ? remoteDevices.find(d => d.id === devSel.deviceId) ?? null : null;
+  const activeDb = remote ? remote.db : db;
+  const readOnly = remote !== null;
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [tagMode, setTagMode] = useState<"and" | "or">("and");
   const [index, setIndex] = useState(0);
@@ -58,8 +64,20 @@ export function BrowseView({
   const curCellRef = useRef<HTMLButtonElement | null>(null);
   const touch = useRef<{ x: number; y: number } | null>(null);
 
-  // 文件夹范围（含子文件夹）；"cat" = 已分类（至少属于一个文件夹）、"uncat" = 未分类；标签筛选叠加其上
+  // 文件夹范围（含子文件夹）；"cat" = 已分类、"uncat" = 未分类；标签筛选叠加其上。
+  // 远程设备范围：sub ""=该设备全部、"uncat"=该设备未分类、其余=该设备内文件夹（标签不适用）
   const inFolder = useMemo(() => {
+    if (devSel) {
+      let arr = activeDb.mistakes;
+      if (devSel.sub === "uncat") {
+        const ids = new Set(activeDb.folders.map(f => f.id));
+        arr = arr.filter(m => !m.folderIds.some(id => ids.has(id)));
+      } else if (devSel.sub) {
+        const set = descendantSet(activeDb.folders, devSel.sub);
+        arr = arr.filter(m => m.folderIds.some(id => set.has(id)));
+      }
+      return arr;
+    }
     let arr = db.mistakes;
     if (selected === "uncat") {
       const ids = new Set(db.folders.map(f => f.id));
@@ -72,8 +90,10 @@ export function BrowseView({
       arr = arr.filter(m => m.folderIds.some(id => set.has(id)));
     }
     return arr;
-  }, [db, selected]);
+  }, [db, activeDb, selected, devSel?.deviceId, devSel?.sub]);
 
+  // 侧栏「本机」文件夹树的计数始终用本机库（远程设备树各自算自己的，见 RemoteDevices.tsx）；
+  // 远程范围下标签筛选不适用，list 里会忽略 activeTags
   const mistakesMatchingTags = useMemo(() => {
     if (activeTags.length === 0) return db.mistakes;
     return tagMode === "and"
@@ -83,7 +103,7 @@ export function BrowseView({
 
   const list = useMemo(() => {
     let arr = inFolder;
-    if (activeTags.length > 0) {
+    if (!devSel && activeTags.length > 0) {
       arr = tagMode === "and"
         ? inFolder.filter(m => activeTags.every(t => m.tags.includes(t)))
         : inFolder.filter(m => activeTags.some(t => m.tags.includes(t)));
@@ -97,7 +117,7 @@ export function BrowseView({
     }
     // 随机：seed 固定的稳定洗牌（换 seed 才换序）
     return seededShuffle(arr, seed);
-  }, [inFolder, activeTags, tagMode, order, seed]);
+  }, [inFolder, activeTags, tagMode, order, seed, devSel?.deviceId]);
 
   const cur = list.length > 0 ? list[Math.min(index, list.length - 1)] : undefined;
 
@@ -118,8 +138,14 @@ export function BrowseView({
     return groups;
   }, [list]);
 
-  const crumb =
-    selected === "" ? "全部错题" : selected === "uncat" ? "未分类" : selected === "cat" ? "已分类" : folderPathName(db.folders, selected);
+  const crumb = devSel
+    ? `${remote ? remote.name : "远程设备"}${devSel.sub === "" ? "" : devSel.sub === "uncat" ? " · 未分类" : ` · ${folderPathName(activeDb.folders, devSel.sub)}`}`
+    : selected === "" ? "全部错题" : selected === "uncat" ? "未分类" : selected === "cat" ? "已分类" : folderPathName(db.folders, selected);
+
+  // 进入远程设备范围时清掉标签筛选（标签属本机库，设备范围不适用）
+  useEffect(() => {
+    if (readOnly) setActiveTags([]);
+  }, [readOnly]);
 
   const toggleTag = (t: string) =>
     setActiveTags(ts => (ts.includes(t) ? ts.filter(x => x !== t) : [...ts, t]));
@@ -144,10 +170,10 @@ export function BrowseView({
     onSelect("");
   };
 
-  // 选择题作答：本次浏览内每题只作答一次，答完自动翻开解析并累计统计（落盘）
+  // 选择题作答：本次浏览内每题只作答一次，答完自动翻开解析并累计统计（落盘）；远程设备只读不作答
   const [picked, setPicked] = useState<number | null>(null);
   const answerOption = (i: number) => {
-    if (!cur || picked !== null || cur.answer === null) return;
+    if (!cur || readOnly || picked !== null || cur.answer === null) return;
     setPicked(i);
     setRevealed(true);
     const ok = i === cur.answer;
@@ -166,7 +192,7 @@ export function BrowseView({
   const copyCur = async (scope: "question" | "all") => {
     if (!cur) return;
     setCopyPopOpen(false);
-    const r = await copyMistake(cur, db.folders, assetsDir, scope);
+    const r = await copyMistake(cur, activeDb.folders, assetsDir, scope);
     setCopiedScope(scope);
     setCopied(r);
     window.setTimeout(() => setCopied(""), 1800);
@@ -245,15 +271,15 @@ export function BrowseView({
         e.preventDefault();
         setRevealed(r => !r);
       } else if (e.key === "e" || e.key === "E") {
-        if (cur) onEdit(cur.id);
+        if (cur && !readOnly) onEdit(cur.id);
       } else if (e.key === "n" || e.key === "N") {
-        onNew();
+        if (!readOnly) onNew();
       }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index, list.length, cur?.id, onEdit, onNew, lightbox, tagPopOpen]);
+  }, [index, list.length, cur?.id, onEdit, onNew, lightbox, tagPopOpen, readOnly]);
 
   const remove = async () => {
     if (!cur) return;
@@ -323,15 +349,22 @@ export function BrowseView({
         {sidebar}
         <div className="browse-main">
           <div className="empty-state">
-            <div className="empty-icon">📚</div>
-            {db.mistakes.length === 0 ? (
-              <>
-                <h2>还没有错题</h2>
-                <p>先录入第一道题，或把攒了一堆的截图文件夹批量导入进来。</p>
-                <button className="btn btn-primary" onClick={onNew}>
-                  ＋ 录入错题
-                </button>
-              </>
+            <div className="empty-icon">{readOnly ? "📱" : "📚"}</div>
+            {activeDb.mistakes.length === 0 ? (
+              readOnly ? (
+                <>
+                  <h2>该设备还没有错题</h2>
+                  <p>{remote?.name} 推送到服务端的库是空的。</p>
+                </>
+              ) : (
+                <>
+                  <h2>还没有错题</h2>
+                  <p>先录入第一道题，或把攒了一堆的截图文件夹批量导入进来。</p>
+                  <button className="btn btn-primary" onClick={onNew}>
+                    ＋ 录入错题
+                  </button>
+                </>
+              )
             ) : (
               <>
                 <h2>当前条件下没有错题</h2>
@@ -363,8 +396,8 @@ export function BrowseView({
           <div
             key={index}
             className={`browse ${dir === 1 ? "anim-next" : "anim-prev"}`}
-            title="按住卡片可拖到左侧文件夹归类（按住 ⌥ 拖 = 追加所属，不清掉原有文件夹）"
-            draggable={!tagPopOpen}
+            title={readOnly ? "远程设备的数据，只读浏览" : "按住卡片可拖到左侧文件夹归类（按住 ⌥ 拖 = 追加所属，不清掉原有文件夹）"}
+            draggable={!tagPopOpen && !readOnly}
             onDragStart={e => {
               e.dataTransfer.setData(DND_MISTAKE, cur.id);
               e.dataTransfer.effectAllowed = "move";
@@ -439,27 +472,31 @@ export function BrowseView({
                   </span>
                 ) : (
                   cur.folderIds.map(fid => {
-                    const f = db.folders.find(x => x.id === fid);
+                    const f = activeDb.folders.find(x => x.id === fid);
                     if (!f) return null;
                     return (
-                      <span key={fid} className="tag-chip folder-chip" title={`所属文件夹：${folderPathName(db.folders, fid)}`}>
+                      <span key={fid} className="tag-chip folder-chip" title={`所属文件夹：${folderPathName(activeDb.folders, fid)}`}>
                         {f.name}
                       </span>
                     );
                   })
                 )}
-                {cur.tags.map(t => (
-                  <span key={t} className="tag-chip">
-                    {t}
-                    <button type="button" title="移除该标签" onClick={() => toggleTagOnCur(t)}>
-                      ×
-                    </button>
-                  </span>
-                ))}
-                <button type="button" className="tag-add-btn" title="新增或选择标签" onClick={() => setTagPopOpen(o => !o)}>
-                  ＋ 标签
-                </button>
-                {tagPopOpen && (
+                {!readOnly &&
+                  cur.tags.map(t => (
+                    <span key={t} className="tag-chip">
+                      {t}
+                      <button type="button" title="移除该标签" onClick={() => toggleTagOnCur(t)}>
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                {readOnly && cur.tags.map(t => <span key={t} className="tag-chip">{t}</span>)}
+                {!readOnly && (
+                  <button type="button" className="tag-add-btn" title="新增或选择标签" onClick={() => setTagPopOpen(o => !o)}>
+                    ＋ 标签
+                  </button>
+                )}
+                {tagPopOpen && !readOnly && (
                   <>
                     <div className="popover-backdrop" onClick={() => setTagPopOpen(false)} />
                     <div className="tag-pop">
@@ -525,7 +562,8 @@ export function BrowseView({
                           type="button"
                           key={i}
                           className={`opt-item ${cls}`}
-                          disabled={answered}
+                          disabled={readOnly || answered}
+                          title={readOnly ? "远程设备的数据，只读" : undefined}
                           onClick={() => answerOption(i)}
                         >
                           <span className="opt-letter">{String.fromCharCode(65 + i)}</span>
@@ -550,14 +588,16 @@ export function BrowseView({
               <div className={`page-a ${revealed ? "" : "masked"}`}>
                 <div className="page-label">解析</div>
                 <div className="page-a-body">
-                  {analysisEmpty ? (
-                    <div className="a-empty">
-                      这道题还没有解析
-                      <button className="btn btn-sm" onClick={() => onEdit(cur.id)}>
-                        去补解析
-                      </button>
-                    </div>
-                  ) : (
+                      {analysisEmpty ? (
+                        <div className="a-empty">
+                          这道题还没有解析
+                          {!readOnly && (
+                            <button className="btn btn-sm" onClick={() => onEdit(cur.id)}>
+                              去补解析
+                            </button>
+                          )}
+                        </div>
+                      ) : (
                     <BlockView blocks={cur.analysis} onImageClick={openImage} />
                   )}
                 </div>
@@ -578,9 +618,15 @@ export function BrowseView({
                       ? "已复制题目 ✓（含图片，可直接粘贴）"
                       : "已复制全部内容 ✓（含图片，可直接粘贴到 Word / 笔记）"
                     : "已复制 ✓（纯文本，此环境不支持带图复制）"
-                  : <>
+                  : readOnly ? (
+                    <>
+                      <kbd>←</kbd> <kbd>→</kbd> 翻页 · <kbd>空格</kbd> 看解析 · 远程设备只读
+                    </>
+                  ) : (
+                    <>
                       <kbd>←</kbd> <kbd>→</kbd> 翻页 · <kbd>空格</kbd> 看解析 · <kbd>E</kbd> 编辑 · <kbd>N</kbd> 新增
-                    </>}
+                    </>
+                  )}
               </span>
               <div className="row-actions">
                 <div className="copy-menu">
@@ -601,15 +647,19 @@ export function BrowseView({
                     </>
                   )}
                 </div>
-                <button className="btn btn-sm" onClick={() => onEdit(cur.id)}>
-                  编辑
-                </button>
-                <button className="btn btn-sm" onClick={openMove}>
-                  移动
-                </button>
-                <button className="btn btn-sm btn-danger" onClick={() => void remove()}>
-                  删除
-                </button>
+                {!readOnly && (
+                  <>
+                    <button className="btn btn-sm" onClick={() => onEdit(cur.id)}>
+                      编辑
+                    </button>
+                    <button className="btn btn-sm" onClick={openMove}>
+                      移动
+                    </button>
+                    <button className="btn btn-sm btn-danger" onClick={() => void remove()}>
+                      删除
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
